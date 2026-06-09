@@ -121,7 +121,7 @@ static inline uint64_t xxh_read64le(const uint8_t* p)
 uint64_t xxhash64(const uint8_t* data, size_t len, uint64_t seed)
 {
     const uint8_t*       end = data + len;
-    const uint8_t* const limit = data + (len & ~static_cast<size_t>(31));
+    const uint8_t* const limit = data + len - 32;
     uint64_t h64;
 
     if (len >= 32) {

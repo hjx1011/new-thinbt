@@ -8,10 +8,17 @@ void Scheduler::init(uint32_t total_chunks, uint32_t local_speed_mbps,
                       RequestIssuer issue_req, HaveBroadcaster broadcast_have) {
     chunk_states_.resize(total_chunks, ChunkState::MISSING);
     availability_.resize(total_chunks, 0);
+    chunk_requested_end_.resize(total_chunks, 0);
     missing_count_ = total_chunks;
     local_speed_mbps_ = local_speed_mbps;
     issue_request_  = std::move(issue_req);
     broadcast_have_ = std::move(broadcast_have);
+}
+
+void Scheduler::set_chunk_sizes(const std::vector<uint32_t>& sizes) {
+    chunk_sub_blocks_.resize(sizes.size());
+    for (size_t i = 0; i < sizes.size(); i++)
+        chunk_sub_blocks_[i] = (sizes[i] + SUB_BLOCK_SIZE - 1) / SUB_BLOCK_SIZE;
 }
 
 void Scheduler::on_bitfield(uint32_t slot_id, const std::vector<bool>& bf) {
@@ -53,6 +60,16 @@ void Scheduler::on_peer_removed(uint32_t slot_id) {
         [slot_id](const auto& p) { return p.slot_id == slot_id; }), peer_slots_.end());
 }
 
+void Scheduler::on_choke_change(uint32_t slot_id, bool choking) {
+    auto* p = peer_slot(slot_id);
+    if (p) p->am_choking = choking;
+}
+
+void Scheduler::dec_peer_pending(uint32_t slot_id) {
+    auto* p = peer_slot(slot_id);
+    if (p && p->pending_requests > 0) p->pending_requests--;
+}
+
 PeerSlot* Scheduler::peer_slot(uint32_t id) {
     for (auto& p : peer_slots_) if (p.slot_id == id) return &p;
     return nullptr;
@@ -79,32 +96,60 @@ uint32_t Scheduler::select_best_peer(uint32_t chunk_idx) {
 
 void Scheduler::tick() {
     if (phase_ == SchedulerPhase::DONE) return;
-    std::vector<std::pair<uint32_t, uint32_t>> missing;
-    for (uint32_t i = 0; i < chunk_states_.size(); i++)
-        if (chunk_states_[i] == ChunkState::MISSING)
-            missing.emplace_back(availability_[i], i);
-    std::sort(missing.begin(), missing.end());
 
-    size_t batch = std::min(missing.size(), size_t(32));
-    for (size_t i = 0; i < batch; i++) {
-        uint32_t ci = missing[i].second;
+    // 收集所有需要 sub-block 的 chunk（MISSING 或还有剩余 sub-block 的 REQUESTED）
+    std::vector<std::pair<uint32_t, uint32_t>> pending;
+    for (uint32_t i = 0; i < chunk_states_.size(); i++) {
+        uint32_t total = i < chunk_sub_blocks_.size() ? chunk_sub_blocks_[i] : 8;
+        uint32_t done  = i < chunk_requested_end_.size() ? chunk_requested_end_[i] : 0;
+        if (chunk_states_[i] == ChunkState::COMPLETE) continue;
+        if (done >= total) {
+            if (chunk_states_[i] == ChunkState::MISSING) continue; // 空 chunk
+            continue;
+        }
+        // MISSING 或 REQUESTED 但还没发完 sub-block
+        pending.emplace_back(availability_[i], i);
+    }
+    if (pending.empty()) return;
+
+    std::sort(pending.begin(), pending.end());  // rarest first
+
+    for (auto& [avail, ci] : pending) {
+        uint32_t total = ci < chunk_sub_blocks_.size() ? chunk_sub_blocks_[ci] : 8;
+        uint32_t done  = ci < chunk_requested_end_.size() ? chunk_requested_end_[ci] : 0;
+        if (done >= total) continue;
+
         uint32_t peer = select_best_peer(ci);
-        if (peer != UINT32_MAX) {
-            auto* p = peer_slot(peer);
-            uint32_t cap = p ? p->pipeline_cap : 16;
-            // 原子分配：只有当 Peer 剩余窗口能容纳整个 Chunk 的 sub-block 时才分配
-            // 防止提前 break 导致 part of chunk 丢失、永久卡死在 REQUESTED 状态
-            static constexpr uint32_t SUB_BLOCKS_PER_CHUNK = 8;
-            if (p && (cap - p->pending_requests) >= SUB_BLOCKS_PER_CHUNK) {
-                chunk_states_[ci] = ChunkState::REQUESTED;
-                for (uint32_t b = 0; b < SUB_BLOCKS_PER_CHUNK; b++) {
-                    issue_request_(peer, ci, b * SUB_BLOCK_SIZE, SUB_BLOCK_SIZE);
-                    p->pending_requests++;
-                }
-            }
-            // 窗口不足则保留 MISSING，下次 tick 重新选 Peer
+        if (peer == UINT32_MAX) continue;
+
+        auto* p = peer_slot(peer);
+        if (!p) continue;
+        uint32_t cap = p->pipeline_cap;
+
+        // 尽可能多发 sub-block，不超过 pipeline 余量和 chunk 剩余量
+        uint32_t remaining = total - done;
+        uint32_t to_issue = std::min(cap - p->pending_requests, remaining);
+        if (to_issue == 0) continue;
+
+        chunk_states_[ci] = ChunkState::REQUESTED;
+        for (uint32_t b = 0; b < to_issue; b++) {
+            uint32_t begin = (done + b) * SUB_BLOCK_SIZE;
+            uint32_t len   = SUB_BLOCK_SIZE;
+            issue_request_(peer, ci, begin, len);
+            p->pending_requests++;
+        }
+        chunk_requested_end_[ci] = done + to_issue;
+    }
+}
+
+void Scheduler::mark_all_complete(const std::vector<bool>& bitfield) {
+    for (size_t i = 0; i < bitfield.size() && i < chunk_states_.size(); i++) {
+        if (bitfield[i]) {
+            if (chunk_states_[i] == ChunkState::MISSING) missing_count_--;
+            chunk_states_[i] = ChunkState::COMPLETE;
         }
     }
+    if (missing_count_ == 0) phase_ = SchedulerPhase::DONE;
 }
 
 void Scheduler::process_completions(std::vector<ChunkCompleteMsg>& completions) {

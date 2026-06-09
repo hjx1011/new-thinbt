@@ -31,15 +31,19 @@ public:
 
     void init(uint32_t total_chunks, uint32_t local_speed_mbps,
               RequestIssuer issue_req, HaveBroadcaster broadcast_have);
+    void set_chunk_sizes(const std::vector<uint32_t>& sizes);
 
     // Event-driven availability (O(1) per event)
     void on_bitfield(uint32_t slot_id, const std::vector<bool>& bf);
     void on_have(uint32_t slot_id, uint32_t chunk_idx);
     void on_peer_added(uint32_t slot_id, uint32_t reported_speed);
     void on_peer_removed(uint32_t slot_id);
+    void on_choke_change(uint32_t slot_id, bool choking);
+    void dec_peer_pending(uint32_t slot_id);
 
     void tick();
     void process_completions(std::vector<ChunkCompleteMsg>& completions);
+    void mark_all_complete(const std::vector<bool>& bitfield);
 
     SchedulerPhase phase() const { return phase_; }
     uint32_t missing_count() const { return missing_count_; }
@@ -49,6 +53,8 @@ private:
     uint32_t select_best_peer(uint32_t chunk_idx);
 
     std::vector<ChunkState> chunk_states_;
+    std::vector<uint32_t>  chunk_sub_blocks_;   // 每个 chunk 的 sub-block 数量
+    std::vector<uint32_t>  chunk_requested_end_; // 已请求到的 sub-block begin 偏移
     std::vector<uint32_t>  availability_;
     std::vector<PeerSlot>  peer_slots_;
     SchedulerPhase phase_ = SchedulerPhase::NORMAL;

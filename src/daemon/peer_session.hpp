@@ -21,6 +21,8 @@ class IOWorkerPool;
 class PeerSession : public std::enable_shared_from_this<PeerSession> {
 public:
     using OnDisconnect = std::function<void(std::shared_ptr<PeerSession>)>;
+    using OnHandshakeDone = std::function<void(std::shared_ptr<PeerSession>)>;
+    using OnPexPeer = std::function<void(const std::string& ip, uint16_t port, uint8_t flags)>;
 
     PeerSession(asio::io_context& io, const Sha1Digest& info_hash, uint32_t local_speed_mbps);
     ~PeerSession();
@@ -55,6 +57,14 @@ public:
     void set_scheduler(Scheduler* s) { scheduler_ = s; }
     void set_io_pool(IOWorkerPool* p) { io_pool_ = p; }
     void set_file_fd(int fd) { file_fd_ = fd; }
+    void set_chunk_offsets(const std::vector<uint64_t>* offsets) { chunk_offsets_ = offsets; }
+    void set_on_pex_peer(OnPexPeer cb) { on_pex_peer_ = std::move(cb); }
+    void set_on_handshake_done(OnHandshakeDone cb) { on_handshake_done_ = std::move(cb); }
+
+    bool is_peer_interested() const { return peer_interested_.load(std::memory_order_acquire); }
+    bool am_interested() const { return am_interested_.load(std::memory_order_acquire); }
+    void send_interested();
+    void send_not_interested();
 
 private:
     enum State { HANDSHAKE, CONNECTED, DISCONNECTED };
@@ -92,6 +102,8 @@ private:
     uint32_t remote_speed_mbps_ = 0;
     std::vector<bool> remote_bitfield_;
     std::atomic<bool> am_choked_{true};
+    std::atomic<bool> peer_interested_{false};
+    std::atomic<bool> am_interested_{false};
 
     std::deque<std::vector<uint8_t>> write_queue_;
     std::mutex write_mtx_;
@@ -104,6 +116,10 @@ private:
     Scheduler* scheduler_ = nullptr;
     IOWorkerPool* io_pool_ = nullptr;
     int file_fd_ = -1;
+    const std::vector<uint64_t>* chunk_offsets_ = nullptr;
+    OnPexPeer on_pex_peer_;
+    OnHandshakeDone on_handshake_done_;
+    std::shared_ptr<std::vector<uint8_t>> current_body_;
 
     static constexpr uint32_t MAX_MSG_SIZE = 17600;
 };

@@ -3,11 +3,12 @@
 
 #include "common/platform.hpp"
 #include "chunk_assembler.hpp"
+#include "readerwriterqueue.h"
 #include <vector>
-#include <deque>
 #include <mutex>
 #include <condition_variable>
 #include <thread>
+#include <chrono>
 #include <memory>
 #include <atomic>
 #include <functional>
@@ -42,7 +43,7 @@ private:
     void worker_loop(uint32_t worker_id);
 
     struct WorkerQueue {
-        std::deque<PieceTask> tasks;
+        moodycamel::ReaderWriterQueue<PieceTask> queue{4096};
         std::mutex mtx;
         std::condition_variable cv;
     };

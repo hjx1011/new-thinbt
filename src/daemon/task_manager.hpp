@@ -6,6 +6,7 @@
 #include "chunk_assembler.hpp"
 #include "io_worker.hpp"
 #include "scheduler.hpp"
+#include "segment_io.hpp"
 #include "tracker_server.hpp"
 #include <memory>
 #include <string>
@@ -33,12 +34,16 @@ struct TaskInfo {
 
 class TaskManager {
 public:
-    TaskManager(uint16_t p2p_port);
+    TaskManager(asio::io_context& io, uint16_t p2p_port,
+                const std::string& tracker_host = "",
+                uint16_t tracker_port = 8080);
 
     std::string cmd_seed(const std::string& seed_path, const std::string& file_path);
     std::string cmd_add(const std::string& seed_path, const std::string& save_path);
     std::vector<TaskInfo> cmd_list();
     std::string cmd_remove(const std::string& task_id, bool force);
+    std::string cmd_update(const std::string& new_seed, const std::string& new_file,
+                           const std::string& old_seed, const std::string& old_file);
 
     TrackerServer& tracker() { return tracker_; }
     void tick();
@@ -65,11 +70,19 @@ private:
         std::unique_ptr<PeerManager> peer_mgr;
         std::shared_ptr<TrackerClient> tracker_client;
 
+        // 文件 I/O
+        int seed_fd = -1;                        // seed: 只读 fd，供 sendfile 使用
+        std::unique_ptr<SegmentWriter> writer;    // download: mmap 分段写入
+        std::vector<uint64_t> chunk_offsets;      // chunk 在文件中的偏移（给 sendfile 算位置）
+
         uint64_t bytes_done = 0;
         double speed_ema = 0.0;
     };
 
+    asio::io_context& io_;
     uint16_t p2p_port_;
+    std::string tracker_host_;
+    uint16_t tracker_port_;
     TrackerServer tracker_;
     std::map<std::string, std::unique_ptr<ActiveTask>> tasks_;
 };

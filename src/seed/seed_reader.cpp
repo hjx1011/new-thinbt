@@ -35,7 +35,9 @@ std::unique_ptr<TSeedFile> read_tseed(const std::string& path) {
         seed->header.to_host_endian();
     }
 
-    if (seed->header.version != 1) {
+    // v1 格式: hton16(1) → bytes 00 01 → LE uint16 0x0100 → ntoh16 → 1
+    // v3 格式: hton16(3) → bytes 03 00 → LE uint16 0x0003 → ntoh16 → 768
+    if (seed->header.version != 1 && seed->header.version != 768 && seed->header.version != 1024) {
         throw std::runtime_error("Unsupported .tseed version: "
             + std::to_string(seed->header.version));
     }

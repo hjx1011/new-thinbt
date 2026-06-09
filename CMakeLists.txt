@@ -49,6 +49,7 @@ target_link_libraries(thinbt_seed PUBLIC thinbt_common)
 add_library(thinbt_daemon STATIC
     src/daemon/chunk_assembler.cpp
     src/daemon/io_worker.cpp
+    src/daemon/segment_io.cpp
     src/daemon/scheduler.cpp
     src/daemon/protocol.cpp
     src/daemon/peer_session.cpp
@@ -57,8 +58,9 @@ add_library(thinbt_daemon STATIC
     src/daemon/ipc_server.cpp
     src/daemon/tracker_client.cpp
     src/daemon/tracker_server.cpp
+    src/daemon/tracker_acceptor.cpp
 )
-target_link_libraries(thinbt_daemon PUBLIC thinbt_cdc thinbt_seed)
+target_link_libraries(thinbt_daemon PUBLIC thinbt_cdc thinbt_seed moodycamel)
 
 # Daemon executable
 add_executable(thinbtd src/daemon/main.cpp)
@@ -66,7 +68,7 @@ target_link_libraries(thinbtd thinbt_daemon)
 
 # CLI executable
 add_executable(tbt src/cli/tbt.cpp src/cli/cli_commands.cpp)
-target_link_libraries(tbt thinbt_common)
+target_link_libraries(tbt thinbt_common thinbt_seed thinbt_cdc)
 
 # Tests
 enable_testing()
@@ -83,3 +85,7 @@ add_thinbt_test(test_fastcdc)
 target_link_libraries(test_fastcdc thinbt_cdc)
 
 add_thinbt_test(test_chunk_assembler)
+
+add_thinbt_test(test_segment_io)
+
+add_thinbt_test(test_loopback)

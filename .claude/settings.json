@@ -1,0 +1,51 @@
+{
+  "includeCoAuthoredBy": false,
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "superpowers-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "obra/superpowers-marketplace"
+      }
+    }
+  },
+  "permissions": {
+    "allow": [
+      "Bash(make *)",
+      "Bash(gcc *)",
+      "Bash(g++ *)",
+      "Bash(git *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(cd *)",
+      "Bash(pwd *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(rm *)",
+      "Bash(mkdir *)",
+      "Bash(echo *)",
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(wc *)",
+      "Bash(sort *)",
+      "Bash(uniq *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(sed *)",
+      "Bash(tar *)",
+      "Bash(dpkg *)",
+      "Bash(objdump *)",
+      "Bash(pkill *)",
+      "Bash(kill *)",
+      "Bash(pgrep *)",
+      "Bash(nproc)",
+      "Bash(uname *)",
+      "Bash(./tbt *)",
+      "Bash(./thinbtd *)"
+    ]
+  }
+}

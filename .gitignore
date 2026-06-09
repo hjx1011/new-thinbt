@@ -3,3 +3,4 @@ build/
 *.a
 *.out
 .DS_Store
+.claude/settings.local.json

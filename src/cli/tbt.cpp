@@ -1,3 +1,5 @@
+#include "cli/cli_commands.hpp"
+
 #include <iostream>
 #include <string>
 #include <cstring>
@@ -32,14 +34,17 @@ static std::string send_ipc(const std::string& json) {
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: tbt <make|seed|add|update|list|peers|remove> [args...]\n";
+        std::cerr << "Usage: tbt <make|info|seed|add|update|list|peers|remove> [args...]\n"
+                  << "  tbt update <new.tseed> <new_file> <old.tseed> <old_file>\n";
         return 1;
     }
 
     std::string cmd = argv[1];
 
     if (cmd == "make") {
-        std::cout << R"({"status":"ok","msg":"Seed file generated"})" << std::endl;
+        std::cout << thinbt::cli_make(argc, argv) << std::endl;
+    } else if (cmd == "info" && argc >= 3) {
+        std::cout << thinbt::cli_info(argc, argv) << std::endl;
     } else if (cmd == "add" && argc >= 3) {
         std::string req = R"({"cmd":"add","args":{"seed_path":")"
             + std::string(argv[2]) + R"(","save_path":")"
@@ -52,6 +57,16 @@ int main(int argc, char* argv[]) {
         std::cout << send_ipc(req) << std::endl;
     } else if (cmd == "list") {
         std::cout << send_ipc(R"({"cmd":"list","args":{}})") << std::endl;
+    } else if (cmd == "update" && argc >= 6) {
+        std::cout << thinbt::cli_update(argc, argv) << std::endl;
+    } else if (cmd == "update" && argc >= 3) {
+        std::string req = R"({"cmd":"update","args":{"task_id":")"
+            + std::string(argv[2]) + R"("}})";
+        std::cout << send_ipc(req) << std::endl;
+    } else if (cmd == "peers" && argc >= 3) {
+        std::string req = R"({"cmd":"peers","args":{"task_id":")"
+            + std::string(argv[2]) + R"("}})";
+        std::cout << send_ipc(req) << std::endl;
     } else if (cmd == "remove" && argc >= 3) {
         std::string req = R"({"cmd":"remove","args":{"task_id":")"
             + std::string(argv[2]) + R"("}})";

@@ -29,6 +29,11 @@ public:
 
     size_t peer_count() const { return sessions_.size(); }
     void set_file_fd(int fd) { file_fd_ = fd; }
+    void set_initial_bitfield(const std::vector<bool>& bf) { initial_bitfield_ = bf; }
+    void set_chunk_offsets(const std::vector<uint64_t>* offsets) { chunk_offsets_ = offsets; }
+
+    PeerSession* get_session(uint32_t slot_id);
+    const std::vector<std::shared_ptr<PeerSession>>& sessions() const { return sessions_; }
 
 private:
     void on_peer_connected(std::shared_ptr<PeerSession> sess);
@@ -42,6 +47,8 @@ private:
     uint32_t local_speed_mbps_;
     asio::ip::tcp::acceptor acceptor_;
     int file_fd_ = -1;
+    std::vector<bool> initial_bitfield_;
+    const std::vector<uint64_t>* chunk_offsets_ = nullptr;
     uint32_t next_slot_id_ = 0;
     std::vector<std::shared_ptr<PeerSession>> sessions_;
 

@@ -1,10 +1,56 @@
 #include "tracker_client.hpp"
+#include "yyjson.h"
 #include <sstream>
 #include <cstring>
 #include <arpa/inet.h>
 #include <iostream>
 
 namespace thinbt {
+namespace {
+
+// RAII wrapper, yyjson_doc 由调用方管理生命周期
+struct JsonDoc {
+    yyjson_doc* doc = nullptr;
+    ~JsonDoc() { if (doc) yyjson_doc_free(doc); }
+    explicit operator bool() const { return doc != nullptr; }
+    yyjson_val* root() const { return yyjson_doc_get_root(doc); }
+};
+
+// 解析 Tracker announce 响应: {"interval":30,"peers":[...]}
+std::vector<PexPeer> parse_tracker_response(const std::string& resp) {
+    std::vector<PexPeer> peers;
+
+    JsonDoc jd;
+    jd.doc = yyjson_read(resp.data(), resp.size(), 0);
+    if (!jd) return peers;
+
+    auto* root = jd.root();
+    if (!root || yyjson_obj_get(root, "error")) return peers;
+
+    auto* peers_arr = yyjson_obj_get(root, "peers");
+    if (!peers_arr || !yyjson_is_arr(peers_arr)) return peers;
+
+    size_t count = yyjson_arr_size(peers_arr);
+    for (size_t i = 0; i < count; i++) {
+        auto* obj = yyjson_arr_get(peers_arr, i);
+        if (!yyjson_is_obj(obj)) continue;
+
+        auto* ip_val    = yyjson_obj_get(obj, "ip");
+        auto* port_val  = yyjson_obj_get(obj, "port");
+        if (!ip_val || !port_val) continue;
+
+        auto* flags_val = yyjson_obj_get(obj, "flags");
+        PexPeer p{};
+        p.ip    = inet_addr(yyjson_get_str(ip_val));
+        p.port  = static_cast<uint16_t>(yyjson_get_uint(port_val));
+        p.flags = flags_val ? static_cast<uint8_t>(yyjson_get_uint(flags_val)) : 0;
+        peers.push_back(p);
+    }
+
+    return peers;
+}
+
+} // anonymous namespace
 
 TrackerClient::TrackerClient(asio::io_context& io, const std::string& info_hash_hex,
                               uint16_t p2p_port, uint32_t speed_mbps)
@@ -36,43 +82,14 @@ void TrackerClient::do_announce(std::string host, uint16_t port, OnPeers on_peer
                 [self, sock, req_str, on_peers = std::move(on_peers), host, port](asio::error_code ec2, size_t) mutable {
                     if (ec2) { self->schedule_retry(std::move(on_peers), host, port); return; }
 
-                    auto buf = std::make_shared<std::vector<uint8_t>>(4096);
-                    sock->async_read_some(asio::buffer(*buf),
-                        [self, sock, buf, on_peers = std::move(on_peers), host, port](asio::error_code ec3, size_t len) mutable {
+                    // '\n' 分帧，使用 async_read_until 读完整行
+                    auto resp_buf = std::make_shared<std::string>();
+                    asio::async_read_until(*sock, asio::dynamic_buffer(*resp_buf), '\n',
+                        [self, sock, resp_buf, on_peers = std::move(on_peers), host, port](asio::error_code ec3, size_t len) mutable {
                             if (ec3) { self->schedule_retry(std::move(on_peers), host, port); return; }
 
-                            std::string resp(reinterpret_cast<char*>(buf->data()), len);
-                            std::vector<PexPeer> peers;
-
-                            auto arr_pos = resp.find("\"peers\":[");
-                            if (arr_pos != std::string::npos) {
-                                size_t p = arr_pos + 9;
-                                while (p < resp.size() && resp[p] != ']') {
-                                    auto ip_pos = resp.find("\"ip\":\"", p);
-                                    if (ip_pos == std::string::npos || ip_pos > resp.find(']', p)) break;
-                                    auto ip_s = ip_pos + 6;
-                                    auto ip_e = resp.find('"', ip_s);
-                                    auto port_pos = resp.find("\"port\":", ip_e);
-                                    uint16_t peer_port = 0;
-                                    if (port_pos != std::string::npos && port_pos < resp.find(']', p))
-                                        peer_port = static_cast<uint16_t>(std::stoi(resp.substr(port_pos + 7)));
-                                    auto flags_pos = resp.find("\"flags\":", port_pos);
-                                    uint8_t flags_v = 0;
-                                    if (flags_pos != std::string::npos && flags_pos < resp.find(']', p))
-                                        flags_v = static_cast<uint8_t>(std::stoi(resp.substr(flags_pos + 8)));
-
-                                    std::string ip_str = resp.substr(ip_s, ip_e - ip_s);
-                                    PexPeer pp{};
-                                    pp.ip = inet_addr(ip_str.c_str());
-                                    pp.port = peer_port;
-                                    pp.flags = flags_v;
-                                    peers.push_back(pp);
-
-                                    p = resp.find('}', ip_e);
-                                    if (p == std::string::npos) break;
-                                    p++;
-                                }
-                            }
+                            std::string resp(resp_buf->data(), len);
+                            std::vector<PexPeer> peers = parse_tracker_response(resp);
 
                             if (peers.empty())
                                 self->schedule_retry(std::move(on_peers), host, port);

@@ -5,6 +5,8 @@
 #include <cstring>
 #include <cstdlib>
 #include <iostream>
+#include <unistd.h>
+#include <arpa/inet.h>
 
 namespace thinbt {
 
@@ -72,6 +74,7 @@ void PeerSession::handle_handshake(const asio::error_code& ec, size_t) {
 
     state_ = State::CONNECTED;
     start_read_header();
+    if (on_handshake_done_) on_handshake_done_(shared_from_this());
 }
 
 // ── Message read chain ──
@@ -103,7 +106,9 @@ void PeerSession::start_read_body(uint32_t body_len, P2PMsgId msg_id) {
     asio::async_read(*socket_, asio::buffer(*body),
         [self, body, msg_id](asio::error_code ec, size_t) {
             if (ec) { self->disconnect(); return; }
+            self->current_body_ = body;
             self->dispatch_message(msg_id, body->data(), static_cast<uint32_t>(body->size()));
+            self->current_body_.reset();
             self->start_read_header();
         });
 }
@@ -111,9 +116,13 @@ void PeerSession::start_read_body(uint32_t body_len, P2PMsgId msg_id) {
 void PeerSession::dispatch_message(P2PMsgId id, const uint8_t* data, uint32_t len) {
     switch (id) {
     case P2PMsgId::CHOKE:          am_choked_.store(true, std::memory_order_release);  break;
-    case P2PMsgId::UNCHOKE:        am_choked_.store(false, std::memory_order_release); break;
-    case P2PMsgId::INTERESTED:     /* peer is interested in our data */ break;
-    case P2PMsgId::NOT_INTERESTED: /* peer not interested */           break;
+    case P2PMsgId::UNCHOKE:
+        am_choked_.store(false, std::memory_order_release);
+        if (scheduler_ && scheduler_->missing_count() > 0)
+            send_interested();
+        break;
+    case P2PMsgId::INTERESTED:     peer_interested_.store(true, std::memory_order_release);  break;
+    case P2PMsgId::NOT_INTERESTED: peer_interested_.store(false, std::memory_order_release); break;
     case P2PMsgId::HAVE:           handle_have_msg(data);   break;
     case P2PMsgId::BITFIELD:       handle_bitfield_msg(data, len); break;
     case P2PMsgId::REQUEST:        handle_request_msg(data); break;
@@ -147,13 +156,17 @@ void PeerSession::handle_request_msg(const uint8_t* data) {
     // CANCEL check — skip if this sub-block was cancelled (Endgame cleanup)
     if (cancelled_set_.count({index, begin})) return;
 
-    uint64_t file_off = index * 131072ULL + begin; // 128KB avg chunk
-#ifdef __linux__
     if (file_fd_ >= 0) {
-        off_t off = static_cast<off_t>(file_off);
-        ::sendfile(socket_->native_handle(), file_fd_, &off, length);
+        uint64_t base_off = (chunk_offsets_ && index < chunk_offsets_->size())
+                            ? (*chunk_offsets_)[index] : index * 131072ULL;
+        uint64_t file_off = base_off + begin;
+        std::vector<uint8_t> buf(length);
+        ssize_t n = pread(file_fd_, buf.data(), length, static_cast<off_t>(file_off));
+        if (n > 0) {
+            auto msg = build_piece(index, begin, buf.data(), static_cast<uint32_t>(n));
+            send_message(std::move(msg));
+        }
     }
-#endif
 }
 
 void PeerSession::handle_cancel_msg(const uint8_t* data) {
@@ -175,11 +188,9 @@ void PeerSession::handle_pex_msg(const uint8_t* data, uint32_t len) {
         memcpy(&p, data + 3 + i * 8, 8);
         p.ip   = ntoh32(p.ip);
         p.port = ntoh16(p.port);
-        // If not "left" marker, try connecting
-        if (!(p.flags & 0x80) && scheduler_) {
+        if (!(p.flags & 0x80) && on_pex_peer_) {
             struct in_addr ia; ia.s_addr = p.ip;
-            // PeerManager callback to connect_to would be set up via scheduler
-            // For now, parsed but connection deferred to PeerManager
+            on_pex_peer_(inet_ntoa(ia), p.port, p.flags);
         }
     }
     (void)op; // 0x00=full, 0x01=delta
@@ -191,8 +202,10 @@ void PeerSession::handle_piece_msg(const uint8_t* data, uint32_t len) {
     memcpy(&index, data, 4); index = ntoh32(index);
     memcpy(&begin, data + 4, 4); begin = ntoh32(begin);
 
-    PieceTask task{index, begin, len - 8, data + 8, nullptr};
+    PieceTask task{index, begin, len - 8, data + 8, current_body_};
     io_pool_->dispatch(task);
+    dec_pending();
+    if (scheduler_) scheduler_->dec_peer_pending(slot_id_);
 }
 
 void PeerSession::record_have(uint32_t chunk_idx) {
@@ -228,15 +241,18 @@ void PeerSession::do_write() {
         if (write_queue_.empty()) { is_writing_ = false; return; }
         front.swap(write_queue_.front()); // swap to avoid holding lock during async
     }
-    asio::async_write(*socket_, asio::buffer(front),
+    auto buf = asio::buffer(front);
+    asio::async_write(*socket_, buf,
         [self, front = std::move(front)](asio::error_code ec, size_t) mutable {
             if (ec) { self->disconnect(); return; }
-            std::lock_guard<std::mutex> lk(self->write_mtx_);
-            self->write_queue_.pop_front();
-            if (!self->write_queue_.empty())
-                self->do_write();
-            else
-                self->is_writing_ = false;
+            bool has_more = false;
+            {
+                std::lock_guard<std::mutex> lk(self->write_mtx_);
+                self->write_queue_.pop_front();
+                has_more = !self->write_queue_.empty();
+                if (!has_more) self->is_writing_ = false;
+            }
+            if (has_more) self->do_write();
         });
 }
 
@@ -246,6 +262,18 @@ void PeerSession::disconnect() {
     asio::error_code ec;
     socket_->close(ec);
     if (on_disconnect_) on_disconnect_(shared_from_this());
+}
+
+void PeerSession::send_interested() {
+    if (am_interested_.load(std::memory_order_acquire)) return;
+    am_interested_.store(true, std::memory_order_release);
+    send_message(build_interested());
+}
+
+void PeerSession::send_not_interested() {
+    if (!am_interested_.load(std::memory_order_acquire)) return;
+    am_interested_.store(false, std::memory_order_release);
+    send_message(build_not_interested());
 }
 
 } // namespace thinbt

@@ -29,6 +29,12 @@ void PeerManager::do_accept() {
                 sess->set_scheduler(&mgr.sched_);
                 sess->set_io_pool(mgr.io_pool_);
                 sess->set_file_fd(mgr.file_fd_);
+                sess->set_chunk_offsets(mgr.chunk_offsets_);
+                sess->set_on_handshake_done([&mgr](std::shared_ptr<PeerSession> s) {
+                    if (!mgr.initial_bitfield_.empty()) {
+                        s->send_message(build_bitfield(mgr.initial_bitfield_));
+                    }
+                });
                 sess->start_inbound(std::move(sock),
                     [&mgr](std::shared_ptr<PeerSession> s) { mgr.on_peer_disconnected(std::move(s)); });
                 mgr.on_peer_connected(std::move(sess));
@@ -42,6 +48,12 @@ void PeerManager::connect_to(const std::string& ip, uint16_t port, uint8_t /*fla
     sess->set_scheduler(&sched_);
     sess->set_io_pool(io_pool_);
     sess->set_file_fd(file_fd_);
+    sess->set_chunk_offsets(chunk_offsets_);
+    sess->set_on_handshake_done([this](std::shared_ptr<PeerSession> s) {
+        if (!initial_bitfield_.empty()) {
+            s->send_message(build_bitfield(initial_bitfield_));
+        }
+    });
     sess->start_outbound(ip, port,
         [this](std::shared_ptr<PeerSession> s) { on_peer_disconnected(std::move(s)); });
     on_peer_connected(std::move(sess));
@@ -50,6 +62,9 @@ void PeerManager::connect_to(const std::string& ip, uint16_t port, uint8_t /*fla
 void PeerManager::on_peer_connected(std::shared_ptr<PeerSession> sess) {
     uint32_t id = next_slot_id_++;
     sess->set_slot_id(id);
+    sess->set_on_pex_peer([this](const std::string& ip, uint16_t port, uint8_t flags) {
+        connect_to(ip, port, flags);
+    });
     sessions_.push_back(sess);
     sched_.on_peer_added(id, sess->link_speed_reported());
     recent_connects_[sess->remote_ip()] = std::chrono::steady_clock::now();
@@ -61,9 +76,18 @@ void PeerManager::on_peer_disconnected(std::shared_ptr<PeerSession> sess) {
     sessions_.erase(std::remove(sessions_.begin(), sessions_.end(), sess), sessions_.end());
 }
 
+PeerSession* PeerManager::get_session(uint32_t slot_id) {
+    for (auto& s : sessions_) {
+        if (s->slot_id() == slot_id) return s.get();
+    }
+    return nullptr;
+}
+
 // ── Choke (10s) ──
 void PeerManager::tick_choke() {
     if (sessions_.empty()) return;
+
+    for (auto& s : sessions_) s->set_choked(true);
 
     std::vector<std::shared_ptr<PeerSession>> sorted = sessions_;
     std::sort(sorted.begin(), sorted.end(),
@@ -74,8 +98,12 @@ void PeerManager::tick_choke() {
     uint32_t optimistic     = slots * 25 / 100;
     uint32_t anti_starvation = slots - tit_for_tat - optimistic;
 
-    for (uint32_t i = 0; i < std::min(tit_for_tat, (uint32_t)sorted.size()); i++)
-        sorted[i]->set_choked(false);
+    for (uint32_t i = 0; i < sorted.size() && tit_for_tat > 0; i++) {
+        if (sorted[i]->is_peer_interested()) {
+            sorted[i]->set_choked(false);
+            tit_for_tat--;
+        }
+    }
 
     std::mt19937 rng(std::random_device{}());
     std::shuffle(sorted.begin(), sorted.end(), rng);
@@ -90,8 +118,9 @@ void PeerManager::tick_choke() {
         }
     }
 
-    // Send choke/unchoke messages
+    // Send choke/unchoke messages + notify Scheduler
     for (auto& s : sessions_) {
+        sched_.on_choke_change(s->slot_id(), s->is_choked());
         std::vector<uint8_t> msg(5);
         if (s->is_choked()) {
             uint32_t len_be = hton32(1); msg[4] = 0;

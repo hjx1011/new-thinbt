@@ -90,6 +90,14 @@ std::vector<uint8_t> build_cancel(uint32_t index, uint32_t begin, uint32_t lengt
     return build_message(P2PMsgId::CANCEL, payload, 12);
 }
 
+std::vector<uint8_t> build_interested() {
+    return build_message(P2PMsgId::INTERESTED, nullptr, 0);
+}
+
+std::vector<uint8_t> build_not_interested() {
+    return build_message(P2PMsgId::NOT_INTERESTED, nullptr, 0);
+}
+
 std::vector<uint8_t> build_pex(bool is_delta, const std::vector<PexPeer>& peers) {
     uint32_t plen = 3 + static_cast<uint32_t>(peers.size()) * 8;
     std::vector<uint8_t> payload(plen);

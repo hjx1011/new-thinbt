@@ -52,6 +52,8 @@ std::vector<uint8_t> build_bitfield(const std::vector<bool>& have);
 std::vector<uint8_t> build_request(uint32_t index, uint32_t begin, uint32_t length);
 std::vector<uint8_t> build_piece(uint32_t index, uint32_t begin, const uint8_t* data, uint32_t len);
 std::vector<uint8_t> build_cancel(uint32_t index, uint32_t begin, uint32_t length);
+std::vector<uint8_t> build_interested();
+std::vector<uint8_t> build_not_interested();
 std::vector<uint8_t> build_pex(bool is_delta, const std::vector<PexPeer>& peers);
 
 bool parse_message_header(const uint8_t* data, size_t len, uint32_t& msg_len, P2PMsgId& id);

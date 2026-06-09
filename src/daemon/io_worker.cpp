@@ -41,37 +41,28 @@ void IOWorkerPool::dispatch(PieceTask task) {
     uint32_t slot_idx = task.begin / SUB_BLOCK_SIZE;
     uint32_t worker   = (task.chunk_idx ^ slot_idx) % num_workers_;
     auto& q = *queues_[worker];
-    {
-        std::lock_guard<std::mutex> lock(q.mtx);
-        q.tasks.push_back(task);
-    }
-    q.cv.notify_one(); // 唤醒对应 worker
+    q.queue.enqueue(task);      // SPSC 无锁入队
+    q.cv.notify_one();          // 唤醒对应 worker
 }
 
 void IOWorkerPool::worker_loop(uint32_t worker_id) {
     auto& q = *queues_[worker_id];
     while (running_.load(std::memory_order_acquire)) {
         PieceTask task;
-        bool has_task = false;
-        {
-            std::unique_lock<std::mutex> lock(q.mtx);
-            // 条件变量挂起，而非 yield 空转
-            q.cv.wait(lock, [&] {
-                return !q.tasks.empty() || !running_.load(std::memory_order_acquire);
-            });
-            if (!q.tasks.empty()) {
-                task = q.tasks.front();
-                q.tasks.pop_front();
-                has_task = true;
-            }
-        }
-        if (has_task) {
+        // 无锁批量消费 SPSC 队列
+        bool any = false;
+        while (q.queue.try_dequeue(task)) {
+            any = true;
             bool complete = assemblers_[task.chunk_idx].on_piece(
                 task.begin, task.data, task.length);
             if (complete && on_complete_) {
                 ChunkCompleteMsg msg{task.chunk_idx, 0};
                 on_complete_(msg);
             }
+        }
+        if (!any) {
+            std::unique_lock<std::mutex> lock(q.mtx);
+            q.cv.wait_for(lock, std::chrono::milliseconds(1));
         }
     }
 }

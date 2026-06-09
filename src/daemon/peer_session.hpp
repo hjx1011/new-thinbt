@@ -80,6 +80,9 @@ public:
     void start_eval_timer();
     uint32_t download_rate_kbps() const { return download_rate_kbps_; }
     void update_download_rate();
+    uint32_t upload_rate_kbps() const { return upload_rate_kbps_; }
+    void update_upload_rate();
+    void add_sent_bytes(uint32_t n) { sent_bytes_since_last_choke_ += n; }
 
 private:
     enum State { HANDSHAKE, CONNECTED, DISCONNECTED };
@@ -149,14 +152,16 @@ private:
     double avg_latency_us_ = 500.0; // 初始假设 500μs
     std::chrono::steady_clock::time_point last_eval_time_;
 
-    // Choke 排序：实际下载速率
+    // Choke 排序：实际下载/上传速率
     uint64_t recv_bytes_since_last_choke_ = 0;
+    uint64_t sent_bytes_since_last_choke_ = 0;
     uint32_t download_rate_kbps_ = 0;
+    uint32_t upload_rate_kbps_ = 0;
     std::chrono::steady_clock::time_point last_choke_eval_time_;
 
     void do_eval_tick(const asio::error_code& ec);
 
-    static constexpr uint32_t MAX_MSG_SIZE = 17600;
+    static constexpr uint32_t MAX_MSG_SIZE = 65536;  // 64KB，支持 524288 chunk 的 bitfield
     static constexpr uint32_t PIPELINE_EVAL_MS = 500;
     static constexpr uint32_t REQUEST_TIMEOUT_MS = 3000;
     static constexpr uint32_t REQUEST_TIMEOUT_LIMIT = 3;

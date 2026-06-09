@@ -46,12 +46,12 @@ void PeerManager::do_accept() {
         });
 }
 
-void PeerManager::connect_to(const std::string& ip, uint16_t port, uint8_t /*flags*/) {
+void PeerManager::connect_to(const std::string& ip, uint16_t port, uint8_t flags) {
     if (sessions_.size() >= MAX_PEERS) return;
 
-    // 检查是否已连接此 IP，避免重复连接
+    // 检查是否已连接此 IP:Port，避免重复连接
     for (auto& s : sessions_) {
-        if (s->remote_ip() == ip) return;
+        if (s->remote_ip() == ip && s->remote_port() == port) return;
     }
 
     auto sess = std::make_shared<PeerSession>(io_, info_hash_, local_speed_mbps_);
@@ -84,13 +84,15 @@ void PeerManager::on_peer_connected(std::shared_ptr<PeerSession> sess) {
         // PEX Delta: 对端离开，从本地连接记录池移除
         recent_connects_.erase(ip);
     });
-    // Fast Fail: 超时后通知 Scheduler 重新调度
-    sess->set_on_request_timeout([this](uint32_t chunk_idx, uint32_t /*begin*/) {
-        sched_.on_subblock_timeout(chunk_idx);
+    // Fast Fail: 超时后通知 Scheduler 重新调度（精确到子块）
+    sess->set_on_request_timeout([this](uint32_t chunk_idx, uint32_t begin) {
+        sched_.on_subblock_timeout(chunk_idx, begin);
     });
     sessions_.push_back(sess);
     sched_.on_peer_added(id, sess->link_speed_reported());
-    recent_connects_[sess->remote_ip()] = std::chrono::steady_clock::now();
+    // 从握手速度推导 flags：千兆=0x02，种子节点在 PEX 中由调用方设置
+    uint8_t derived_flags = (sess->link_speed_reported() >= 1000) ? 0x02 : 0x00;
+    recent_connects_[sess->remote_ip()] = {std::chrono::steady_clock::now(), derived_flags};
 }
 
 void PeerManager::on_peer_disconnected(std::shared_ptr<PeerSession> sess) {
@@ -112,15 +114,26 @@ void PeerManager::tick_choke() {
 
     for (auto& s : sessions_) s->set_choked(true);
 
-    // 更新所有 peer 的下载速率（基于 10 秒窗口内接收字节数）
-    for (auto& s : sessions_) s->update_download_rate();
+    // 更新所有 peer 的下载速率和上传速率（基于 10 秒窗口内收发字节数）
+    for (auto& s : sessions_) {
+        s->update_download_rate();
+        s->update_upload_rate();
+    }
+
+    // 计算真实的闲置上行带宽
+    uint32_t current_upload_kbps = 0;
+    for (auto& s : sessions_)
+        current_upload_kbps += s->upload_rate_kbps();
+    uint32_t current_upload_mbps = current_upload_kbps / 1000;
+    uint32_t idle_speed = local_speed_mbps_ > current_upload_mbps
+                         ? local_speed_mbps_ - current_upload_mbps : 0;
+    uint32_t slots = std::min(4u + idle_speed / 10 * 2, 20u);
 
     std::vector<std::shared_ptr<PeerSession>> sorted = sessions_;
     // Tit-for-Tat: 按实际下载速率排序，而非 pipeline_cap（预估上限）
     std::sort(sorted.begin(), sorted.end(),
         [](const auto& a, const auto& b) { return a->download_rate_kbps() > b->download_rate_kbps(); });
 
-    uint32_t slots = std::min(4u + local_speed_mbps_ / 100 * 2, 20u);
     uint32_t tit_for_tat    = slots * 50 / 100;
     uint32_t optimistic     = slots * 25 / 100;
     uint32_t anti_starvation = slots - tit_for_tat - optimistic;
@@ -145,18 +158,12 @@ void PeerManager::tick_choke() {
         }
     }
 
-    // Send choke/unchoke messages + notify Scheduler
+    // 使用 build_message 发送 choke/unchoke + 通知 Scheduler
     for (auto& s : sessions_) {
         sched_.on_choke_change(s->slot_id(), s->is_choked());
-        std::vector<uint8_t> msg(5);
-        if (s->is_choked()) {
-            uint32_t len_be = hton32(1); msg[4] = 0;
-            memcpy(msg.data(), &len_be, 4);
-        } else {
-            uint32_t len_be = hton32(1); msg[4] = 1;
-            memcpy(msg.data(), &len_be, 4);
-        }
-        s->send_message(std::move(msg));
+        s->send_message(s->is_choked()
+            ? build_message(P2PMsgId::CHOKE, nullptr, 0)
+            : build_message(P2PMsgId::UNCHOKE, nullptr, 0));
     }
 }
 
@@ -165,14 +172,17 @@ void PeerManager::tick_pex() {
     std::vector<PexPeer> delta;
     auto cutoff = std::chrono::steady_clock::now() - std::chrono::seconds(60);
 
-    for (auto& [ip, t] : recent_connects_)
+    for (auto& [ip, pair] : recent_connects_) {
+        auto& t = pair.first;
+        auto flags = pair.second;
         if (t > cutoff) {
             PexPeer p{};
             p.ip   = inet_addr(ip.c_str());
             p.port = htons(16889);
-            p.flags = 0;
+            p.flags = flags;
             delta.push_back(p);
         }
+    }
 
     for (auto& [ip, t] : recent_disconnects_)
         if (t > cutoff) {

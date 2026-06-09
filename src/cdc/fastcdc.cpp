@@ -6,17 +6,19 @@
 namespace thinbt {
 
 // Gear table — precomputed random 64-bit values for rolling hash
-static const uint64_t GEAR[256] = {
-    0x9E3779B185EBCA87, 0x2C13A0F1B8D9E506, 0x7F3D6C4B2A1E09F8, 0xE5A4B3C2D1F0E9D8,
-    0xC7B6A59483726150, 0x4F3E2D1C0B0A0908, 0x1F2E3D4C5B6A7988, 0xA1B2C3D4E5F60718,
-    0x9A8B7C6D5E4F3021, 0x1020304050607080, 0x90A0B0C0D0E0F000, 0x1122334455667788,
-    0x99AABBCCDDEEFF00, 0x123456789ABCDEF0, 0xFEDCBA9876543210, 0x0F1E2D3C4B5A6978,
-};
+static const std::array<uint64_t, 256> GEAR = []() {
+    std::array<uint64_t, 256> arr{};
+    uint64_t seed = 0x9E3779B185EBCA87ULL;
+    for (int i = 0; i < 256; i++) {
+        seed = (seed ^ (seed >> 12)) * 0x2545F4914F6CDD1DULL;
+        arr[i] = seed;
+    }
+    return arr;
+}();
 static_assert(sizeof(GEAR) / sizeof(GEAR[0]) == 256, "Gear table must have 256 entries");
 
 static inline uint64_t gear_update(uint8_t byte, uint64_t fp) {
-    // Shift left by 1, XOR with gear table entry for incoming byte
-    return (fp << 1) | (fp >> 63) ^ GEAR[byte];
+    return (fp << 1) | ((fp >> 63) ^ GEAR[byte]);
 }
 
 struct ScanState {

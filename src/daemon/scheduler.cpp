@@ -12,16 +12,24 @@ static uint64_t monotonic_ms() {
 }
 
 void Scheduler::init(uint32_t total_chunks, uint32_t local_speed_mbps,
-                      RequestIssuer issue_req, HaveBroadcaster broadcast_have) {
+                      RequestIssuer issue_req, HaveBroadcaster broadcast_have,
+                      NotInterestedBroadcaster broadcast_not_interested) {
     chunk_states_.resize(total_chunks, ChunkState::MISSING);
     availability_.resize(total_chunks, 0);
-    chunk_requested_end_.resize(total_chunks, 0);
     chunk_sub_done_.resize(total_chunks);
-    chunk_first_req_time_.resize(total_chunks, 0);
+    chunk_sub_req_.resize(total_chunks);
+    chunk_sub_req_time_.resize(total_chunks);
+    chunk_sub_done_count_.resize(total_chunks, 0);
     missing_count_ = total_chunks;
     local_speed_mbps_ = local_speed_mbps;
     issue_request_  = std::move(issue_req);
     broadcast_have_ = std::move(broadcast_have);
+    broadcast_not_interested_ = std::move(broadcast_not_interested);
+
+    // 活跃 chunk 索引缓存（避免每 tick O(N) 全扫）
+    active_chunks_.reserve(total_chunks);
+    for (uint32_t i = 0; i < total_chunks; i++)
+        active_chunks_.push_back(i);
 }
 
 void Scheduler::set_cancel_issuer(CancelIssuer cancel) {
@@ -33,8 +41,11 @@ void Scheduler::set_chunk_sizes(const std::vector<uint32_t>& sizes) {
     for (size_t i = 0; i < sizes.size(); i++) {
         uint32_t n = (sizes[i] + SUB_BLOCK_SIZE - 1) / SUB_BLOCK_SIZE;
         chunk_sub_blocks_[i] = n;
-        if (i < chunk_sub_done_.size())
+        if (i < chunk_sub_done_.size()) {
             chunk_sub_done_[i].resize(n, false);
+            chunk_sub_req_[i].resize(n, false);
+            chunk_sub_req_time_[i].resize(n, 0);
+        }
     }
 }
 
@@ -88,10 +99,14 @@ void Scheduler::dec_peer_pending(uint32_t slot_id, uint32_t chunk_idx, uint32_t 
     if (!p || p->pending_requests == 0) return;
     p->pending_requests--;
 
-    // 标记 sub-block 完成位图
+    // 标记 sub-block 完成位图 + 累加完成计数
     uint32_t slot = begin / SUB_BLOCK_SIZE;
-    if (chunk_idx < chunk_sub_done_.size() && slot < chunk_sub_done_[chunk_idx].size())
-        chunk_sub_done_[chunk_idx][slot] = true;
+    if (chunk_idx < chunk_sub_done_.size() && slot < chunk_sub_done_[chunk_idx].size()) {
+        if (!chunk_sub_done_[chunk_idx][slot]) {
+            chunk_sub_done_[chunk_idx][slot] = true;
+            chunk_sub_done_count_[chunk_idx]++;
+        }
+    }
 
     // 从 peer 的 active 集合中移除
     auto it = p->active_sub_blocks.find(chunk_idx);
@@ -107,8 +122,8 @@ PeerSlot* Scheduler::peer_slot(uint32_t id) {
     return nullptr;
 }
 
-uint32_t Scheduler::select_best_peer(uint32_t chunk_idx) {
-    uint32_t best_slot = UINT32_MAX;
+std::optional<uint32_t> Scheduler::select_best_peer(uint32_t chunk_idx) {
+    uint32_t best_slot = 0;
     int best_score = INT_MIN;
     for (auto& p : peer_slots_) {
         if (chunk_idx >= p.remote_bitfield.size()) continue;
@@ -123,6 +138,7 @@ uint32_t Scheduler::select_best_peer(uint32_t chunk_idx) {
         score -= static_cast<int>(p.rtt_us) / 2000;
         if (score > best_score) { best_score = score; best_slot = p.slot_id; }
     }
+    if (best_score == INT_MIN) return std::nullopt;
     return best_slot;
 }
 
@@ -161,53 +177,54 @@ void Scheduler::tick() {
     uint64_t now = monotonic_ms();
 
     // ═══════════════════════════════════════════════════════
-    // NORMAL 逻辑（所有阶段都执行）：Rarest First + 批量发 sub-block
+    // NORMAL 逻辑（所有阶段都执行）：Rarest First + 逐 sub-block 发请求
+    // 使用 active_chunks_ 缓存，避免 O(N) 全扫 32768 个 chunk
     // ═══════════════════════════════════════════════════════
     std::vector<std::pair<uint32_t, uint32_t>> pending;
-    for (uint32_t i = 0; i < chunk_states_.size(); i++) {
-        uint32_t total = i < chunk_sub_blocks_.size() ? chunk_sub_blocks_[i] : 8;
-        uint32_t done  = i < chunk_requested_end_.size() ? chunk_requested_end_[i] : 0;
-        if (chunk_states_[i] == ChunkState::COMPLETE) continue;
-        if (done >= total) {
-            // 所有 sub-block 已发出但尚未全部完成 → 保持在 DOWNLOADING
-            if (chunk_states_[i] == ChunkState::MISSING) continue;
+    for (uint32_t ci : active_chunks_) {
+        if (ci >= chunk_states_.size()) continue;
+        if (chunk_states_[ci] == ChunkState::COMPLETE) continue;
+        uint32_t total = ci < chunk_sub_blocks_.size() ? chunk_sub_blocks_[ci] : 8;
+        uint32_t req_count = ci < chunk_sub_req_.size()
+            ? static_cast<uint32_t>(std::count(chunk_sub_req_[ci].begin(), chunk_sub_req_[ci].end(), true)) : 0;
+        if (req_count >= total) {
+            if (chunk_states_[ci] == ChunkState::MISSING) continue;
             continue;
         }
-        pending.emplace_back(availability_[i], i);
+        pending.emplace_back(availability_[ci], ci);
     }
     if (!pending.empty()) {
+        // 只处理前 BATCH_SIZE 个最稀缺的 chunk，避免对大列表全排序
+        constexpr uint32_t BATCH_SIZE = 1024;
+        if (pending.size() > BATCH_SIZE) {
+            std::nth_element(pending.begin(), pending.begin() + BATCH_SIZE, pending.end());
+            pending.resize(BATCH_SIZE);
+        }
         std::sort(pending.begin(), pending.end());  // rarest first
 
         for (auto& [avail, ci] : pending) {
             uint32_t total = ci < chunk_sub_blocks_.size() ? chunk_sub_blocks_[ci] : 8;
-            uint32_t done  = ci < chunk_requested_end_.size() ? chunk_requested_end_[ci] : 0;
-            if (done >= total) continue;
-
-            uint32_t peer = select_best_peer(ci);
-            if (peer == UINT32_MAX) continue;
+            auto peer_opt = select_best_peer(ci);
+            if (!peer_opt) continue;
+            uint32_t peer = *peer_opt;
 
             auto* p = peer_slot(peer);
             if (!p) continue;
             uint32_t cap = p->pipeline_cap;
 
-            uint32_t remaining = total - done;
-            uint32_t to_issue = std::min(cap - p->pending_requests, remaining);
-            if (to_issue == 0) continue;
-
-            // 首次发出 sub-block → 进入 DOWNLOADING，记录时间戳
-            bool first_request = (chunk_states_[ci] == ChunkState::MISSING);
             chunk_states_[ci] = ChunkState::DOWNLOADING;
-            if (first_request && ci < chunk_first_req_time_.size())
-                chunk_first_req_time_[ci] = now;
 
-            for (uint32_t b = 0; b < to_issue; b++) {
-                uint32_t begin = (done + b) * SUB_BLOCK_SIZE;
-                uint32_t len   = SUB_BLOCK_SIZE;
-                issue_request_(peer, ci, begin, len);
-                p->pending_requests++;
-                p->active_sub_blocks[ci].insert(begin);
+            for (uint32_t b = 0; b < total; b++) {
+                if (p->pending_requests >= cap) break;
+                if (!chunk_sub_req_[ci][b]) {
+                    chunk_sub_req_[ci][b] = true;
+                    chunk_sub_req_time_[ci][b] = now;
+                    uint32_t begin = b * SUB_BLOCK_SIZE;
+                    issue_request_(peer, ci, begin, SUB_BLOCK_SIZE);
+                    p->pending_requests++;
+                    p->active_sub_blocks[ci].insert(begin);
+                }
             }
-            chunk_requested_end_[ci] = done + to_issue;
         }
     }
 
@@ -219,29 +236,22 @@ void Scheduler::tick() {
 }
 
 void Scheduler::tick_endgame(uint64_t now_ms) {
-    // 收集所有 DOWNLOADING 状态的 chunk
+    // 收集所有 DOWNLOADING 状态的 chunk（从活跃列表中筛选）
     std::vector<uint32_t> downloading;
-    for (uint32_t i = 0; i < chunk_states_.size(); i++) {
-        if (chunk_states_[i] == ChunkState::DOWNLOADING)
-            downloading.push_back(i);
+    for (uint32_t ci : active_chunks_) {
+        if (ci < chunk_states_.size() && chunk_states_[ci] == ChunkState::DOWNLOADING)
+            downloading.push_back(ci);
     }
     if (downloading.empty()) return;
 
     // 优先处理剩余 sub-block 少的 chunk（接近完成的最需要加速）
     std::sort(downloading.begin(), downloading.end(), [this](uint32_t a, uint32_t b) {
-        uint32_t rem_a = 0, rem_b = 0;
-        if (a < chunk_sub_blocks_.size() && a < chunk_sub_done_.size()) {
-            uint32_t total = chunk_sub_blocks_[a];
-            uint32_t done  = static_cast<uint32_t>(
-                std::count(chunk_sub_done_[a].begin(), chunk_sub_done_[a].end(), true));
-            rem_a = total > done ? total - done : 0;
-        }
-        if (b < chunk_sub_blocks_.size() && b < chunk_sub_done_.size()) {
-            uint32_t total = chunk_sub_blocks_[b];
-            uint32_t done  = static_cast<uint32_t>(
-                std::count(chunk_sub_done_[b].begin(), chunk_sub_done_[b].end(), true));
-            rem_b = total > done ? total - done : 0;
-        }
+        uint32_t done_a = a < chunk_sub_done_count_.size() ? chunk_sub_done_count_[a] : 0;
+        uint32_t done_b = b < chunk_sub_done_count_.size() ? chunk_sub_done_count_[b] : 0;
+        uint32_t total_a = a < chunk_sub_blocks_.size() ? chunk_sub_blocks_[a] : 0;
+        uint32_t total_b = b < chunk_sub_blocks_.size() ? chunk_sub_blocks_[b] : 0;
+        uint32_t rem_a = total_a > done_a ? total_a - done_a : 0;
+        uint32_t rem_b = total_b > done_b ? total_b - done_b : 0;
         return rem_a < rem_b;  // 剩余少的优先
     });
 
@@ -250,12 +260,7 @@ void Scheduler::tick_endgame(uint64_t now_ms) {
         if (endgame_processed >= MAX_ENDGAME_CHUNKS) break;
 
         uint32_t total = ci < chunk_sub_blocks_.size() ? chunk_sub_blocks_[ci] : 0;
-        if (total == 0 || ci >= chunk_sub_done_.size()) continue;
-
-        // 饥饿判定阈值：2 倍当前负责 Peer 的 RTT，至少 50ms
-        uint64_t chunk_req_time = ci < chunk_first_req_time_.size()
-            ? chunk_first_req_time_[ci] : 0;
-        if (chunk_req_time == 0) continue;
+        if (total == 0 || ci >= chunk_sub_req_time_.size()) continue;
 
         // 找该 chunk 的主要负责 Peer（active_sub_blocks 最多的那个）
         uint32_t primary_peer = UINT32_MAX;
@@ -268,8 +273,8 @@ void Scheduler::tick_endgame(uint64_t now_ms) {
             }
         }
 
-        // 计算饥饿阈值
-        uint64_t hunger_threshold_ms = 50; // 最小 50ms
+        // 饥饿阈值：2 倍主要 peer 的 RTT，至少 50ms
+        uint64_t hunger_threshold_ms = 50;
         if (primary_peer != UINT32_MAX) {
             auto* pp = peer_slot(primary_peer);
             if (pp && pp->rtt_us > 0)
@@ -278,8 +283,17 @@ void Scheduler::tick_endgame(uint64_t now_ms) {
 
         bool any_hungry = false;
         for (uint32_t s = 0; s < total; s++) {
-            if (chunk_sub_done_[ci][s]) continue;
-            if ((now_ms - chunk_req_time) <= hunger_threshold_ms) continue;
+            // 已完成或未请求的 sub-block 不参与饥饿判定
+            if (ci < chunk_sub_done_.size() && s < chunk_sub_done_[ci].size() && chunk_sub_done_[ci][s])
+                continue;
+            if (ci >= chunk_sub_req_.size() || s >= chunk_sub_req_[ci].size() || !chunk_sub_req_[ci][s])
+                continue;
+
+            // 基于该 sub-block 自己的请求时间做饥饿判定，而非 chunk 级时间戳
+            uint64_t sub_req_time = ci < chunk_sub_req_time_.size() && s < chunk_sub_req_time_[ci].size()
+                ? chunk_sub_req_time_[ci][s] : 0;
+            if (sub_req_time == 0) continue;
+            if ((now_ms - sub_req_time) <= hunger_threshold_ms) continue;
 
             // 饥饿 sub-block：找 2 个最空闲的额外 Peer 发冗余请求
             any_hungry = true;
@@ -288,8 +302,7 @@ void Scheduler::tick_endgame(uint64_t now_ms) {
                 auto* rpeer = peer_slot(rp);
                 if (!rpeer) continue;
                 uint32_t begin = s * SUB_BLOCK_SIZE;
-                uint32_t len   = SUB_BLOCK_SIZE;
-                issue_request_(rp, ci, begin, len);
+                issue_request_(rp, ci, begin, SUB_BLOCK_SIZE);
                 rpeer->pending_requests++;
                 rpeer->active_sub_blocks[ci].insert(begin);
             }
@@ -303,6 +316,7 @@ void Scheduler::send_cancel_for_chunk(uint32_t chunk_idx, uint32_t exclude_slot)
     if (!cancel_request_) return;
 
     for (auto& p : peer_slots_) {
+        if (p.slot_id == exclude_slot) continue;  // 跳过赢家 Peer，它已经完成了
         auto it = p.active_sub_blocks.find(chunk_idx);
         if (it == p.active_sub_blocks.end() || it->second.empty()) continue;
 
@@ -318,47 +332,78 @@ void Scheduler::process_completions(std::vector<ChunkCompleteMsg>& completions) 
         chunk_states_[msg.chunk_idx] = ChunkState::COMPLETE;
         missing_count_--;
 
-        // Cancel 清理：chunk 已完成，向所有还在传该 chunk 的 peer 发 Cancel
-        // 冗余请求的数据已经无用了，必须尽快取消以释放对端上行带宽和本端 I/O
-        send_cancel_for_chunk(msg.chunk_idx, UINT32_MAX); // 取消所有 peer，不排除任何
+        // 从活跃列表中移除已完成的 chunk
+        auto it = std::find(active_chunks_.begin(), active_chunks_.end(), msg.chunk_idx);
+        if (it != active_chunks_.end()) {
+            *it = active_chunks_.back();
+            active_chunks_.pop_back();
+        }
+
+        // Cancel 清理：排除赢家 Peer，取消其他所有还在传该 chunk 的冗余请求
+        send_cancel_for_chunk(msg.chunk_idx, msg.winning_peer_slot);
 
         broadcast_have_(msg.chunk_idx);
     }
     completions.clear();
-    if (missing_count_ == 0) phase_ = SchedulerPhase::DONE;
-    else if (missing_count_ < ENDGAME_THRESHOLD) phase_ = SchedulerPhase::ENDGAME;
+    if (missing_count_ == 0) {
+        phase_ = SchedulerPhase::DONE;
+        // 所有 chunk 完成，通知所有 peer 本节点不再需要数据
+        if (broadcast_not_interested_) broadcast_not_interested_();
+    } else if (missing_count_ < ENDGAME_THRESHOLD) {
+        phase_ = SchedulerPhase::ENDGAME;
+    }
 }
 
 void Scheduler::on_verify_failed(uint32_t chunk_idx) {
-    // SHA-256 校验失败：回退为 MISSING，Scheduler 下一轮 tick() 自动重新下载
+    // SHA-256 校验失败：回退为 MISSING，重置所有 sub-block 状态
     chunk_states_[chunk_idx] = ChunkState::MISSING;
-    if (chunk_idx < chunk_requested_end_.size())
-        chunk_requested_end_[chunk_idx] = 0;
+    if (chunk_idx < chunk_sub_req_.size())
+        std::fill(chunk_sub_req_[chunk_idx].begin(), chunk_sub_req_[chunk_idx].end(), false);
+    if (chunk_idx < chunk_sub_req_time_.size())
+        std::fill(chunk_sub_req_time_[chunk_idx].begin(), chunk_sub_req_time_[chunk_idx].end(), 0);
     if (chunk_idx < chunk_sub_done_.size())
         std::fill(chunk_sub_done_[chunk_idx].begin(), chunk_sub_done_[chunk_idx].end(), false);
+    if (chunk_idx < chunk_sub_done_count_.size())
+        chunk_sub_done_count_[chunk_idx] = 0;
+
+    // 确保 chunk 在活跃列表中
+    if (std::find(active_chunks_.begin(), active_chunks_.end(), chunk_idx) == active_chunks_.end())
+        active_chunks_.push_back(chunk_idx);
 }
 
-void Scheduler::on_subblock_timeout(uint32_t chunk_idx) {
-    // Fast Fail 超时：Peer 未能在 3 秒内交付子块
-    // 将 chunk 重置为 MISSING，下一轮 tick() 重新分配新 Peer
-    // ChunkAssembler 是幂等的（mmap 原地写入），已收到子块重复下载不影响正确性
+void Scheduler::on_subblock_timeout(uint32_t chunk_idx, uint32_t begin) {
+    // Fast Fail 超时：仅重置超时的那个 sub-block
+    // 已完成的 sub-block 不受影响，chunk 保持在 DOWNLOADING 状态
+    // 下一轮 tick() 会自动为该 sub-block 选择新 Peer 重发
     if (chunk_idx >= chunk_states_.size()) return;
     if (chunk_states_[chunk_idx] == ChunkState::COMPLETE) return;
-    chunk_states_[chunk_idx] = ChunkState::MISSING;
-    if (chunk_idx < chunk_requested_end_.size())
-        chunk_requested_end_[chunk_idx] = 0;
-    if (chunk_idx < chunk_sub_done_.size())
-        std::fill(chunk_sub_done_[chunk_idx].begin(), chunk_sub_done_[chunk_idx].end(), false);
+
+    uint32_t slot = begin / SUB_BLOCK_SIZE;
+    if (chunk_idx < chunk_sub_req_.size() && slot < chunk_sub_req_[chunk_idx].size()) {
+        chunk_sub_req_[chunk_idx][slot] = false; // 标记为未请求，下一轮 tick 自动重发
+    }
+    if (chunk_idx < chunk_sub_req_time_.size() && slot < chunk_sub_req_time_[chunk_idx].size()) {
+        chunk_sub_req_time_[chunk_idx][slot] = 0;
+    }
 }
 
 void Scheduler::mark_all_complete(const std::vector<bool>& bitfield) {
     for (size_t i = 0; i < bitfield.size() && i < chunk_states_.size(); i++) {
         if (bitfield[i]) {
-            if (chunk_states_[i] == ChunkState::MISSING) missing_count_--;
-            chunk_states_[i] = ChunkState::COMPLETE;
+            if (chunk_states_[i] != ChunkState::COMPLETE) {
+                if (chunk_states_[i] == ChunkState::MISSING) missing_count_--;
+                chunk_states_[i] = ChunkState::COMPLETE;
+                // 从活跃列表中移除
+                auto it = std::find(active_chunks_.begin(), active_chunks_.end(), static_cast<uint32_t>(i));
+                if (it != active_chunks_.end()) {
+                    *it = active_chunks_.back();
+                    active_chunks_.pop_back();
+                }
+            }
         }
     }
     if (missing_count_ == 0) phase_ = SchedulerPhase::DONE;
+    else if (missing_count_ < ENDGAME_THRESHOLD) phase_ = SchedulerPhase::ENDGAME;
 }
 
 } // namespace thinbt

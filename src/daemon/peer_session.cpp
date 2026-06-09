@@ -125,11 +125,17 @@ void PeerSession::start_read_body(uint32_t body_len, P2PMsgId msg_id) {
 
 void PeerSession::dispatch_message(P2PMsgId id, const uint8_t* data, uint32_t len) {
     switch (id) {
-    case P2PMsgId::CHOKE:          am_choked_.store(true, std::memory_order_release);  break;
+    case P2PMsgId::CHOKE:
+        am_choked_.store(true, std::memory_order_release);
+        if (scheduler_) scheduler_->on_choke_change(slot_id_, true);
+        break;
     case P2PMsgId::UNCHOKE:
         am_choked_.store(false, std::memory_order_release);
-        if (scheduler_ && scheduler_->missing_count() > 0)
-            send_interested();
+        if (scheduler_) {
+            scheduler_->on_choke_change(slot_id_, false);
+            if (scheduler_->missing_count() > 0)
+                send_interested();
+        }
         break;
     case P2PMsgId::INTERESTED:     peer_interested_.store(true, std::memory_order_release);  break;
     case P2PMsgId::NOT_INTERESTED: peer_interested_.store(false, std::memory_order_release); break;
@@ -180,6 +186,7 @@ void PeerSession::handle_request_msg(const uint8_t* data) {
         ssize_t n = thinbt_pread(file_fd_, buf.data(), length, static_cast<off_t>(file_off));
         if (n > 0) {
             auto msg = build_piece(index, begin, buf.data(), static_cast<uint32_t>(n));
+            add_sent_bytes(msg.size());
             send_message(std::move(msg));
         }
     }
@@ -406,6 +413,15 @@ void PeerSession::update_download_rate() {
     }
     recv_bytes_since_last_choke_ = 0;
     last_choke_eval_time_ = now;
+}
+
+void PeerSession::update_upload_rate() {
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed_s = std::chrono::duration_cast<std::chrono::duration<double>>(now - last_choke_eval_time_).count();
+    if (elapsed_s > 0.0) {
+        upload_rate_kbps_ = static_cast<uint32_t>(sent_bytes_since_last_choke_ * 8.0 / elapsed_s / 1000.0);
+    }
+    sent_bytes_since_last_choke_ = 0;
 }
 
 } // namespace thinbt

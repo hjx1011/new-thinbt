@@ -94,7 +94,9 @@ void IpcServer::handle(const std::string& request, std::string& response) {
                 << R"(,"bytes_done":)" << tasks[i].bytes_done
                 << R"(,"speed_mib_s":)" << tasks[i].speed_mib_s
                 << R"(,"file_path":")" << tasks[i].file_path << R"(")"
-                << R"(,"seed_path":")" << tasks[i].seed_path << R"("})";
+                << R"(,"seed_path":")" << tasks[i].seed_path << R"(")"
+                << R"(,"started_at":")" << tasks[i].started_at << R"(")"
+                << R"(,"finished_at":")" << tasks[i].finished_at << R"("})";
         }
         oss << "]}}";
         response = oss.str();
@@ -139,7 +141,9 @@ void IpcServer::handle(const std::string& request, std::string& response) {
                         << R"(,"speed_mib_s":)" << t.speed_mib_s
                         << R"(,"bytes_done":)" << t.bytes_done
                         << R"(,"file_path":")" << t.file_path << R"(")"
-                        << R"(,"seed_path":")" << t.seed_path << R"("}})";
+                        << R"(,"seed_path":")" << t.seed_path << R"(")"
+                        << R"(,"started_at":")" << t.started_at << R"(")"
+                        << R"(,"finished_at":")" << t.finished_at << R"("}})";
                     response = oss.str();
                     found = true;
                     break;

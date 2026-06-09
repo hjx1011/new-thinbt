@@ -8,6 +8,7 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <optional>
 #include <cstdint>
 
 namespace thinbt {
@@ -36,9 +37,11 @@ public:
     using RequestIssuer = std::function<void(uint32_t peer_slot, uint32_t chunk_idx, uint32_t begin, uint32_t length)>;
     using HaveBroadcaster = std::function<void(uint32_t chunk_idx)>;
     using CancelIssuer = std::function<void(uint32_t peer_slot, uint32_t chunk_idx, uint32_t begin, uint32_t length)>;
+    using NotInterestedBroadcaster = std::function<void()>;
 
     void init(uint32_t total_chunks, uint32_t local_speed_mbps,
-              RequestIssuer issue_req, HaveBroadcaster broadcast_have);
+              RequestIssuer issue_req, HaveBroadcaster broadcast_have,
+              NotInterestedBroadcaster broadcast_not_interested);
     void set_cancel_issuer(CancelIssuer cancel);
     void set_chunk_sizes(const std::vector<uint32_t>& sizes);
 
@@ -53,7 +56,7 @@ public:
     void tick();
     void process_completions(std::vector<ChunkCompleteMsg>& completions);
     void on_verify_failed(uint32_t chunk_idx);
-    void on_subblock_timeout(uint32_t chunk_idx);
+    void on_subblock_timeout(uint32_t chunk_idx, uint32_t begin);
     void mark_all_complete(const std::vector<bool>& bitfield);
 
     SchedulerPhase phase() const { return phase_; }
@@ -61,20 +64,24 @@ public:
     PeerSlot* peer_slot(uint32_t id);
 
 private:
-    uint32_t select_best_peer(uint32_t chunk_idx);
+    std::optional<uint32_t> select_best_peer(uint32_t chunk_idx);
     void send_cancel_for_chunk(uint32_t chunk_idx, uint32_t exclude_slot);
     void tick_endgame(uint64_t now_ms);
 
     std::vector<ChunkState> chunk_states_;
     std::vector<uint32_t>  chunk_sub_blocks_;   // 每个 chunk 的 sub-block 数量
-    std::vector<uint32_t>  chunk_requested_end_; // 已请求到的 sub-block begin 偏移
     std::vector<uint32_t>  availability_;
+    std::vector<uint32_t>  active_chunks_;       // 非 COMPLETE 的 chunk 索引缓存，避免 O(N) 全扫
 
-    // ENDGAME 跟踪（主线程独占，无需 atomic）
-    // 每个 chunk 的 sub-block 完成位图：sub_done_[chunk][slot] = true 表示已完成
+    // sub-block 级别跟踪（主线程独占，无需 atomic）
+    // chunk_sub_done_[chunk][slot] = true 表示该 sub-block 已完成
     std::vector<std::vector<bool>> chunk_sub_done_;
-    // chunk 首次进入 DOWNLOADING 的时间戳（毫秒，单调时钟）
-    std::vector<uint64_t> chunk_first_req_time_;
+    // chunk_sub_req_[chunk][slot] = true 表示该 sub-block 已发出请求
+    std::vector<std::vector<bool>> chunk_sub_req_;
+    // chunk_sub_req_time_[chunk][slot] = 发出请求时的单调时钟（毫秒），0 表示未请求
+    std::vector<std::vector<uint64_t>> chunk_sub_req_time_;
+    // chunk_sub_done_count_[chunk] = 该 chunk 已完成的 sub-block 数量
+    std::vector<uint32_t> chunk_sub_done_count_;
 
     std::vector<PeerSlot>  peer_slots_;
     SchedulerPhase phase_ = SchedulerPhase::NORMAL;
@@ -83,6 +90,7 @@ private:
     RequestIssuer issue_request_;
     CancelIssuer  cancel_request_;
     HaveBroadcaster broadcast_have_;
+    NotInterestedBroadcaster broadcast_not_interested_;
 
     static constexpr uint32_t ENDGAME_THRESHOLD    = 128;
     static constexpr uint32_t MAX_ENDGAME_CHUNKS   = 32;

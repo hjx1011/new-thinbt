@@ -22,6 +22,10 @@ enum class P2PMsgId : uint8_t {
     PEX            = 9,
 };
 
+// 替换 src/daemon/protocol.hpp 中对应的结构体定义
+
+#pragma pack(push, 1)
+
 struct Handshake {
     static constexpr const char* PROTOCOL_ID = "thinBT Protocol";
     static constexpr size_t PROTOCOL_ID_LEN  = 19;
@@ -42,6 +46,8 @@ struct PexPeer {
     uint8_t  flags;
     uint8_t  reserved;
 };
+
+#pragma pack(pop)
 
 std::vector<uint8_t> serialize_handshake(const Handshake& h);
 bool parse_handshake(const uint8_t* data, size_t len, Handshake& h);

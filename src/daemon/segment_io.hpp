@@ -4,6 +4,7 @@
 #include "common/platform.hpp"
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <cstdint>
 
 namespace thinbt {
@@ -37,31 +38,36 @@ public:
     // fd 在 SegmentWriter 生命周期内保持打开
     int get_file_fd() const { return fd_; }
 
-    // 关闭所有资源：msync + munmap 当前段 + close fd
+    // 关闭所有资源：msync + munmap 所有段 + close fd
     void close();
 
     uint64_t file_size() const     { return file_size_; }
     uint32_t segment_count() const { return segment_count_; }
 
 private:
-    struct Segment {
-        uint64_t offset;   // 文件内偏移
-        uint64_t size;     // 映射大小（含 over-map guard），≤ segment_size_ + MAX_CHUNK_SIZE
+    struct MappedSeg {
+        uint8_t* data = nullptr;
+        uint64_t size = 0;
     };
 
-    // 切换活跃段：msync 旧段 → munmap 旧段 → mmap 新段
+    // mmap 新段，不 unmap 任何已有段
+    // 避免 segment 切换导致已初始化的 ChunkAssembler 持有悬空指针
     bool map_segment(uint32_t seg_idx);
-    void unmap_current();
+    void unmap_all();
 
     std::string  file_path_;
     uint64_t     file_size_      = 0;
-    uint64_t     segment_size_   = 0;   // 对齐后的段大小（MAX_CHUNK_SIZE 的倍数）
+    uint64_t     segment_size_   = 0;
     uint32_t     segment_count_  = 0;
     int          fd_             = -1;
 
-    int32_t      active_segment_ = -1;  // 当前 mmap 的段索引
-    uint8_t*     active_data_    = nullptr;
-    uint64_t     active_size_    = 0;
+    // 段缓存：key=段索引，value={指针, 大小}
+    // 始终保留所有已 mmap 的段，只在 close() 时全部释放
+    std::unordered_map<uint32_t, MappedSeg> mapped_segments_;
+
+    // 最近一次访问的段（快速路径：连续 chunk 访问同一段无需查 map）
+    uint32_t cached_seg_idx_ = UINT32_MAX;
+    MappedSeg* cached_seg_   = nullptr;
 };
 
 } // namespace thinbt

@@ -54,7 +54,7 @@ private:
     uint32_t next_slot_id_ = 0;
     std::vector<std::shared_ptr<PeerSession>> sessions_;
 
-    std::map<std::string, std::chrono::steady_clock::time_point> recent_connects_;
+    std::map<std::string, std::pair<std::chrono::steady_clock::time_point, uint8_t>> recent_connects_;
     std::map<std::string, std::chrono::steady_clock::time_point> recent_disconnects_;
 };
 

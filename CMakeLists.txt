@@ -93,3 +93,4 @@ add_thinbt_test(test_chunk_assembler)
 add_thinbt_test(test_segment_io)
 
 add_thinbt_test(test_loopback)
+add_thinbt_test(test_multinode)

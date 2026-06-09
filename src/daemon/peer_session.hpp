@@ -12,6 +12,8 @@
 #include <functional>
 #include <cstdint>
 #include <set>
+#include <map>
+#include <chrono>
 
 namespace thinbt {
 
@@ -22,7 +24,8 @@ class PeerSession : public std::enable_shared_from_this<PeerSession> {
 public:
     using OnDisconnect = std::function<void(std::shared_ptr<PeerSession>)>;
     using OnHandshakeDone = std::function<void(std::shared_ptr<PeerSession>)>;
-    using OnPexPeer = std::function<void(const std::string& ip, uint16_t port, uint8_t flags)>;
+    using OnPexPeer   = std::function<void(const std::string& ip, uint16_t port, uint8_t flags)>;
+    using OnPexRemove = std::function<void(const std::string& ip, uint16_t port)>;
 
     PeerSession(asio::io_context& io, const Sha1Digest& info_hash, uint32_t local_speed_mbps);
     ~PeerSession();
@@ -50,6 +53,7 @@ public:
     uint32_t slot_id() const { return slot_id_; }
     void set_slot_id(uint32_t id) { slot_id_ = id; }
     std::string remote_ip() const;
+    uint16_t remote_port() const;
 
     void record_have(uint32_t chunk_idx);
     void record_bitfield(const uint8_t* data, uint32_t len);
@@ -59,12 +63,23 @@ public:
     void set_file_fd(int fd) { file_fd_ = fd; }
     void set_chunk_offsets(const std::vector<uint64_t>* offsets) { chunk_offsets_ = offsets; }
     void set_on_pex_peer(OnPexPeer cb) { on_pex_peer_ = std::move(cb); }
+    void set_on_pex_remove(OnPexRemove cb) { on_pex_remove_ = std::move(cb); }
     void set_on_handshake_done(OnHandshakeDone cb) { on_handshake_done_ = std::move(cb); }
 
     bool is_peer_interested() const { return peer_interested_.load(std::memory_order_acquire); }
     bool am_interested() const { return am_interested_.load(std::memory_order_acquire); }
     void send_interested();
     void send_not_interested();
+
+    // Fast Fail + Pipeline
+    using OnRequestTimeout = std::function<void(uint32_t chunk_idx, uint32_t begin)>;
+    void set_on_request_timeout(OnRequestTimeout cb) { on_request_timeout_ = std::move(cb); }
+    uint32_t consecutive_timeouts() const { return consecutive_timeouts_; }
+    void reset_timeouts() { consecutive_timeouts_ = 0; }
+    void record_request_sent(uint32_t chunk_idx, uint32_t begin);
+    void start_eval_timer();
+    uint32_t download_rate_kbps() const { return download_rate_kbps_; }
+    void update_download_rate();
 
 private:
     enum State { HANDSHAKE, CONNECTED, DISCONNECTED };
@@ -118,10 +133,38 @@ private:
     int file_fd_ = -1;
     const std::vector<uint64_t>* chunk_offsets_ = nullptr;
     OnPexPeer on_pex_peer_;
+    OnPexRemove on_pex_remove_;
     OnHandshakeDone on_handshake_done_;
+    OnRequestTimeout on_request_timeout_;
     std::shared_ptr<std::vector<uint8_t>> current_body_;
 
+    // Fast Fail: 记录每个 Request 的发出时间 {chunk_idx, begin} → time_point
+    std::map<std::pair<uint32_t, uint32_t>, std::chrono::steady_clock::time_point> pending_times_;
+    uint32_t consecutive_timeouts_ = 0;
+    std::unique_ptr<asio::steady_timer> eval_timer_;
+
+    // 动态 Pipeline 评估
+    uint32_t pipeline_eval_cycles_ = 0;
+    uint32_t timeout_count_this_cycle_ = 0;
+    double avg_latency_us_ = 500.0; // 初始假设 500μs
+    std::chrono::steady_clock::time_point last_eval_time_;
+
+    // Choke 排序：实际下载速率
+    uint64_t recv_bytes_since_last_choke_ = 0;
+    uint32_t download_rate_kbps_ = 0;
+    std::chrono::steady_clock::time_point last_choke_eval_time_;
+
+    void do_eval_tick(const asio::error_code& ec);
+
     static constexpr uint32_t MAX_MSG_SIZE = 17600;
+    static constexpr uint32_t PIPELINE_EVAL_MS = 500;
+    static constexpr uint32_t REQUEST_TIMEOUT_MS = 3000;
+    static constexpr uint32_t REQUEST_TIMEOUT_LIMIT = 3;
+    static constexpr uint32_t PIPELINE_MIN = 8;
+    static constexpr uint32_t PIPELINE_MAX = 100;
+    static constexpr double LATENCY_THRESHOLD_US = 2000.0;
+    static constexpr double PIPELINE_UP_FACTOR = 1.5;
+    static constexpr double LATENCY_EMA_ALPHA = 0.3;
 };
 
 } // namespace thinbt

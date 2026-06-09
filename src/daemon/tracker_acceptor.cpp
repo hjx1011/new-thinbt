@@ -92,7 +92,7 @@ void TrackerAcceptor::handle_client(std::shared_ptr<asio::ip::tcp::socket> socke
 
             // 构造响应：排除请求方（server_.announce 已做过滤，这里防御性再过滤一次）
             std::ostringstream resp;
-            resp << "{\"op\":\"announce_ok\",\"peers\":[";
+            resp << "{\"interval\":30,\"peers\":[";
             bool first = true;
             for (auto& p : peers) {
                 if (p.ip == peer_ip && p.port == peer_port) continue;

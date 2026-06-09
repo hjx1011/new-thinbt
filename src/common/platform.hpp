@@ -8,19 +8,32 @@
     #include <winsock2.h>
     #include <ws2tcpip.h>
     #include <windows.h>
+    #include <io.h>
     #define THINBT_PLATFORM_WINDOWS 1
+    #define thinbt_pread  _pread
+    #define thinbt_pwrite _pwrite
+    #define thinbt_close  _close
 #else
+    #include <sys/types.h>
     #include <unistd.h>
     #include <fcntl.h>
     #include <sys/mman.h>
     #include <sys/sendfile.h>
     #include <arpa/inet.h>
     #define THINBT_PLATFORM_LINUX 1
+    #define thinbt_pread  ::pread
+    #define thinbt_pwrite ::pwrite
+    #define thinbt_close  ::close
 #endif
 
 #include <cstdint>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+using ssize_t = int64_t;
+using off_t   = int64_t;
+#endif
 
 namespace thinbt {
 

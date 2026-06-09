@@ -8,20 +8,24 @@
 #include <sstream>
 #include <cstring>
 #include <stdexcept>
+
+#ifndef _WIN32
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#endif
 
 namespace thinbt {
 
-static std::string send_ipc(const std::string& json) {
+std::string send_ipc(const std::string& json, uint16_t port) {
+#ifndef _WIN32
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return R"({"status":"error","error":"socket failed"})";
 
     struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port   = htons(16888);
+    addr.sin_port   = htons(port);
     addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
     if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
@@ -37,6 +41,10 @@ static std::string send_ipc(const std::string& json) {
     close(fd);
 
     return std::string(buf, n > 0 ? n : 0);
+#else
+    (void)json; (void)port;
+    return R"({"status":"error","error":"CLI not yet implemented on Windows"})";
+#endif
 }
 
 std::string cli_make(int argc, char* argv[]) {
@@ -168,7 +176,7 @@ std::string cli_info(int argc, char* argv[]) {
     return oss.str();
 }
 
-std::string cli_update(int argc, char* argv[]) {
+std::string cli_update(int argc, char* argv[], uint16_t ipc_port) {
     if (argc < 6) {
         return R"({"status":"error","error":"usage: tbt update <new.tseed> <new_file> <old.tseed> <old_file>"})";
     }
@@ -185,7 +193,7 @@ std::string cli_update(int argc, char* argv[]) {
     req += R"(,"old_file":")" + old_file + R"(")";
     req += "}}";
 
-    return send_ipc(req);
+    return send_ipc(req, ipc_port);
 }
 
 } // namespace thinbt

@@ -18,6 +18,8 @@ class IOWorkerPool;
 
 class PeerManager {
 public:
+    static constexpr size_t MAX_PEERS = 60;
+
     PeerManager(asio::io_context& io, Scheduler& sched, IOWorkerPool* io_pool,
                 const Sha1Digest& info_hash, uint32_t local_speed_mbps, uint16_t p2p_port);
 

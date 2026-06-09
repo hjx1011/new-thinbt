@@ -14,11 +14,13 @@
 #include <thread>
 #include <map>
 
-using namespace thinbt;
-
 static std::atomic<bool> running{true};
 
 int main(int argc, char* argv[]) {
+    using thinbt::TaskManager;
+    using thinbt::IpcServer;
+    using thinbt::TrackerAcceptor;
+
     uint16_t ipc_port     = 16888;
     uint16_t tracker_port = 8080;
     uint16_t p2p_port     = 16889;

@@ -48,8 +48,8 @@ private:
 bool clone_range(int src_fd, uint64_t src_off,
                  int dst_fd, uint64_t dst_off, uint64_t len);
 
-uint64_t sendfile_zero_copy(int socket_fd, int file_fd,
-                            uint64_t offset, uint64_t count);
+ssize_t sendfile_zero_copy(int socket_fd, int file_fd,
+                            uint64_t& offset, size_t count);
 
 } // namespace thinbt
 

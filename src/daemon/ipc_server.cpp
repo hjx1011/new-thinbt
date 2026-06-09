@@ -63,22 +63,25 @@ void IpcServer::handle(const std::string& request, std::string& response) {
         }
         response = task_mgr_.cmd_seed(seed_path, file_path);
     } else if (cmd == "add") {
-        // Extract seed_path and save_path
-        std::string seed_path = "/tmp/test.tseed";
-        std::string save_path = "/tmp/downloaded";
+        std::string seed_path, save_path;
         auto sp = request.find("\"seed_path\":\"");
         if (sp != std::string::npos) {
             auto ss = sp + 13;
             auto se = request.find('"', ss);
             if (se != std::string::npos) seed_path = request.substr(ss, se - ss);
         }
-        auto fp = request.find("\"save_path\":\"");
-        if (fp != std::string::npos) {
-            auto fs = fp + 13;
-            auto fe = request.find('"', fs);
-            if (fe != std::string::npos) save_path = request.substr(fs, fe - fs);
+        if (seed_path.empty()) {
+            response = R"({"status":"error","error":"missing seed_path"})";
+        } else {
+            auto fp = request.find("\"save_path\":\"");
+            if (fp != std::string::npos) {
+                auto fs = fp + 13;
+                auto fe = request.find('"', fs);
+                if (fe != std::string::npos) save_path = request.substr(fs, fe - fs);
+            }
+            if (save_path.empty()) save_path = "downloaded_file";
+            response = task_mgr_.cmd_add(seed_path, save_path);
         }
-        response = task_mgr_.cmd_add(seed_path, save_path);
     } else if (cmd == "list") {
         auto tasks = task_mgr_.cmd_list();
         std::ostringstream oss;
@@ -149,7 +152,18 @@ void IpcServer::handle(const std::string& request, std::string& response) {
             response = R"({"status":"error","error":"update requires task_id or new_seed"})";
         }
     } else if (cmd == "peers") {
-        response = R"({"status":"error","error":"peers command not yet implemented"})";
+        std::string task_id;
+        auto tp = request.find("\"task_id\":\"");
+        if (tp != std::string::npos) {
+            auto ts = tp + 11;
+            auto te = request.find('"', ts);
+            if (te != std::string::npos) task_id = request.substr(ts, te - ts);
+        }
+        if (task_id.empty()) {
+            response = R"({"status":"error","error":"missing task_id"})";
+        } else {
+            response = task_mgr_.cmd_peers(task_id);
+        }
     } else {
         response = R"({"status":"error","error":"unknown command"})";
     }

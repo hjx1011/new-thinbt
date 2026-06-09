@@ -43,6 +43,8 @@ public:
     };
     const std::vector<SubBlock>& sub_blocks() const { return sub_blocks_; }
 
+    const uint8_t* base() const { return base_; }
+    uint32_t chunk_size() const { return chunk_size_; }
     uint32_t total_slots() const { return total_slots_; }
     uint32_t pending_count_val() const {
         return pending_count_.load(std::memory_order_acquire);

@@ -31,6 +31,9 @@ target_link_libraries(thinbt_common PUBLIC
     OpenSSL::SSL OpenSSL::Crypto
     yyjson
 )
+if(WIN32)
+    target_link_libraries(thinbt_common PUBLIC ws2_32 iphlpapi)
+endif()
 
 # CDC library (depends on common)
 add_library(thinbt_cdc STATIC
@@ -49,6 +52,7 @@ target_link_libraries(thinbt_seed PUBLIC thinbt_common)
 add_library(thinbt_daemon STATIC
     src/daemon/chunk_assembler.cpp
     src/daemon/io_worker.cpp
+    src/daemon/verify_worker.cpp
     src/daemon/segment_io.cpp
     src/daemon/scheduler.cpp
     src/daemon/protocol.cpp

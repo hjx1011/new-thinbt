@@ -6,6 +6,9 @@
 #include "protocol.hpp"
 #include <vector>
 #include <functional>
+#include <map>
+#include <set>
+#include <cstdint>
 
 namespace thinbt {
 
@@ -19,6 +22,10 @@ struct PeerSlot {
     uint32_t pipeline_cap = 16;
     bool     am_choking = true;
     std::vector<bool> remote_bitfield;
+
+    // chunk_idx → set of begin offsets this peer is currently downloading
+    // 用于 Chunk 完成时 Cancel 清理 + 饥饿判定时排除已有请求的 Peer
+    std::map<uint32_t, std::set<uint32_t>> active_sub_blocks;
 };
 
 enum class SchedulerPhase { NORMAL, ENDGAME, DONE };
@@ -28,9 +35,11 @@ class Scheduler {
 public:
     using RequestIssuer = std::function<void(uint32_t peer_slot, uint32_t chunk_idx, uint32_t begin, uint32_t length)>;
     using HaveBroadcaster = std::function<void(uint32_t chunk_idx)>;
+    using CancelIssuer = std::function<void(uint32_t peer_slot, uint32_t chunk_idx, uint32_t begin, uint32_t length)>;
 
     void init(uint32_t total_chunks, uint32_t local_speed_mbps,
               RequestIssuer issue_req, HaveBroadcaster broadcast_have);
+    void set_cancel_issuer(CancelIssuer cancel);
     void set_chunk_sizes(const std::vector<uint32_t>& sizes);
 
     // Event-driven availability (O(1) per event)
@@ -39,10 +48,12 @@ public:
     void on_peer_added(uint32_t slot_id, uint32_t reported_speed);
     void on_peer_removed(uint32_t slot_id);
     void on_choke_change(uint32_t slot_id, bool choking);
-    void dec_peer_pending(uint32_t slot_id);
+    void dec_peer_pending(uint32_t slot_id, uint32_t chunk_idx, uint32_t begin);
 
     void tick();
     void process_completions(std::vector<ChunkCompleteMsg>& completions);
+    void on_verify_failed(uint32_t chunk_idx);
+    void on_subblock_timeout(uint32_t chunk_idx);
     void mark_all_complete(const std::vector<bool>& bitfield);
 
     SchedulerPhase phase() const { return phase_; }
@@ -51,17 +62,31 @@ public:
 
 private:
     uint32_t select_best_peer(uint32_t chunk_idx);
+    void send_cancel_for_chunk(uint32_t chunk_idx, uint32_t exclude_slot);
+    void tick_endgame(uint64_t now_ms);
 
     std::vector<ChunkState> chunk_states_;
     std::vector<uint32_t>  chunk_sub_blocks_;   // 每个 chunk 的 sub-block 数量
     std::vector<uint32_t>  chunk_requested_end_; // 已请求到的 sub-block begin 偏移
     std::vector<uint32_t>  availability_;
+
+    // ENDGAME 跟踪（主线程独占，无需 atomic）
+    // 每个 chunk 的 sub-block 完成位图：sub_done_[chunk][slot] = true 表示已完成
+    std::vector<std::vector<bool>> chunk_sub_done_;
+    // chunk 首次进入 DOWNLOADING 的时间戳（毫秒，单调时钟）
+    std::vector<uint64_t> chunk_first_req_time_;
+
     std::vector<PeerSlot>  peer_slots_;
     SchedulerPhase phase_ = SchedulerPhase::NORMAL;
     uint32_t missing_count_ = 0;
     uint32_t local_speed_mbps_ = 1000;
     RequestIssuer issue_request_;
+    CancelIssuer  cancel_request_;
     HaveBroadcaster broadcast_have_;
+
+    static constexpr uint32_t ENDGAME_THRESHOLD    = 128;
+    static constexpr uint32_t MAX_ENDGAME_CHUNKS   = 32;
+    static constexpr uint32_t MAX_REDUNDANT_PEERS  = 2;   // 饥饿时最多额外发 2 个 Peer
 };
 
 } // namespace thinbt

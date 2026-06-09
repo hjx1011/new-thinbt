@@ -5,6 +5,7 @@
 #include "seed/tseed.hpp"
 #include "chunk_assembler.hpp"
 #include "io_worker.hpp"
+#include "verify_worker.hpp"
 #include "scheduler.hpp"
 #include "segment_io.hpp"
 #include "tracker_server.hpp"
@@ -44,6 +45,7 @@ public:
     std::string cmd_remove(const std::string& task_id, bool force);
     std::string cmd_update(const std::string& new_seed, const std::string& new_file,
                            const std::string& old_seed, const std::string& old_file);
+    std::string cmd_peers(const std::string& task_id);
 
     TrackerServer& tracker() { return tracker_; }
     void tick();
@@ -62,10 +64,13 @@ private:
         std::string file_path;
         std::string seed_path;
         bool is_seed = false;
+        std::string state;                       // seeding / downloading / waiting / complete / error
+        std::string started_at;                  // ISO 8601 启动时间
+        std::string finished_at;                 // ISO 8601 完成时间
 
         std::unique_ptr<ChunkAssembler[]> assemblers;
         std::unique_ptr<IOWorkerPool> io_pool;
-        std::vector<ChunkCompleteMsg> completions;
+        std::unique_ptr<VerifyWorkerPool> verify_pool;
         std::unique_ptr<Scheduler> scheduler;
         std::unique_ptr<PeerManager> peer_mgr;
         std::shared_ptr<TrackerClient> tracker_client;
@@ -77,6 +82,8 @@ private:
 
         uint64_t bytes_done = 0;
         double speed_ema = 0.0;
+        uint64_t last_bytes_done = 0;            // 上一 tick 的 bytes_done，用于计算速度
+        std::atomic<bool> tracker_dead{false};   // Tracker 重试耗尽标记
     };
 
     asio::io_context& io_;

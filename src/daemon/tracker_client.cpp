@@ -2,7 +2,6 @@
 #include "yyjson.h"
 #include <sstream>
 #include <cstring>
-#include <arpa/inet.h>
 #include <iostream>
 
 namespace thinbt {
@@ -101,7 +100,14 @@ void TrackerClient::do_announce(std::string host, uint16_t port, OnPeers on_peer
 }
 
 void TrackerClient::schedule_retry(OnPeers on_peers, std::string host, uint16_t port) {
-    if (!retry_enabled_ || retry_count_ >= MAX_RETRIES) return;
+    if (!retry_enabled_ || retry_count_ >= MAX_RETRIES) {
+        // 重试耗尽，通知 TaskManager 将状态设为 waiting
+        if (!dead_signalled_ && on_dead_) {
+            dead_signalled_ = true;
+            on_dead_();
+        }
+        return;
+    }
     retry_count_++;
     auto self = shared_from_this();
     auto timer = std::make_shared<asio::steady_timer>(io_, std::chrono::seconds(30));

@@ -56,7 +56,7 @@ void IOWorkerPool::worker_loop(uint32_t worker_id) {
             bool complete = assemblers_[task.chunk_idx].on_piece(
                 task.begin, task.data, task.length);
             if (complete && on_complete_) {
-                ChunkCompleteMsg msg{task.chunk_idx, 0};
+                ChunkCompleteMsg msg{task.chunk_idx, task.peer_slot};
                 on_complete_(msg);
             }
         }

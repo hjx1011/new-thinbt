@@ -4,7 +4,6 @@
 #include <random>
 #include <cstring>
 #include <iostream>
-#include <arpa/inet.h>
 
 namespace thinbt {
 
@@ -25,6 +24,10 @@ void PeerManager::do_accept() {
     acceptor_.async_accept(
         [&mgr](asio::error_code ec, asio::ip::tcp::socket sock) {
             if (!ec) {
+                if (mgr.sessions_.size() >= MAX_PEERS) {
+                    mgr.do_accept();
+                    return;
+                }
                 auto sess = std::make_shared<PeerSession>(mgr.io_, mgr.info_hash_, mgr.local_speed_mbps_);
                 sess->set_scheduler(&mgr.sched_);
                 sess->set_io_pool(mgr.io_pool_);
@@ -44,6 +47,13 @@ void PeerManager::do_accept() {
 }
 
 void PeerManager::connect_to(const std::string& ip, uint16_t port, uint8_t /*flags*/) {
+    if (sessions_.size() >= MAX_PEERS) return;
+
+    // 检查是否已连接此 IP，避免重复连接
+    for (auto& s : sessions_) {
+        if (s->remote_ip() == ip) return;
+    }
+
     auto sess = std::make_shared<PeerSession>(io_, info_hash_, local_speed_mbps_);
     sess->set_scheduler(&sched_);
     sess->set_io_pool(io_pool_);
@@ -63,7 +73,20 @@ void PeerManager::on_peer_connected(std::shared_ptr<PeerSession> sess) {
     uint32_t id = next_slot_id_++;
     sess->set_slot_id(id);
     sess->set_on_pex_peer([this](const std::string& ip, uint16_t port, uint8_t flags) {
+        // PEX 全量/增量新 Peer: 上限检查 + 去重后连接
+        if (sessions_.size() >= MAX_PEERS) return;
+        for (auto& s : sessions_) {
+            if (s->remote_ip() == ip) return;
+        }
         connect_to(ip, port, flags);
+    });
+    sess->set_on_pex_remove([this](const std::string& ip, uint16_t /*port*/) {
+        // PEX Delta: 对端离开，从本地连接记录池移除
+        recent_connects_.erase(ip);
+    });
+    // Fast Fail: 超时后通知 Scheduler 重新调度
+    sess->set_on_request_timeout([this](uint32_t chunk_idx, uint32_t /*begin*/) {
+        sched_.on_subblock_timeout(chunk_idx);
     });
     sessions_.push_back(sess);
     sched_.on_peer_added(id, sess->link_speed_reported());
@@ -89,9 +112,13 @@ void PeerManager::tick_choke() {
 
     for (auto& s : sessions_) s->set_choked(true);
 
+    // 更新所有 peer 的下载速率（基于 10 秒窗口内接收字节数）
+    for (auto& s : sessions_) s->update_download_rate();
+
     std::vector<std::shared_ptr<PeerSession>> sorted = sessions_;
+    // Tit-for-Tat: 按实际下载速率排序，而非 pipeline_cap（预估上限）
     std::sort(sorted.begin(), sorted.end(),
-        [](const auto& a, const auto& b) { return a->pipeline_cap() > b->pipeline_cap(); });
+        [](const auto& a, const auto& b) { return a->download_rate_kbps() > b->download_rate_kbps(); });
 
     uint32_t slots = std::min(4u + local_speed_mbps_ / 100 * 2, 20u);
     uint32_t tit_for_tat    = slots * 50 / 100;

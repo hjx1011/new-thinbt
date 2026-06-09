@@ -29,7 +29,14 @@ add_library(thinbt_cdc STATIC
 )
 target_link_libraries(thinbt_cdc PUBLIC thinbt_common)
 
-# Daemon library (depends on cdc)
+# Seed library (depends on common)
+add_library(thinbt_seed STATIC
+    src/seed/seed_reader.cpp
+    src/seed/seed_writer.cpp
+)
+target_link_libraries(thinbt_seed PUBLIC thinbt_common)
+
+# Daemon library (depends on cdc + seed)
 add_library(thinbt_daemon STATIC
     src/daemon/chunk_assembler.cpp
     src/daemon/io_worker.cpp
@@ -40,10 +47,8 @@ add_library(thinbt_daemon STATIC
     src/daemon/ipc_server.cpp
     src/daemon/tracker_client.cpp
     src/daemon/tracker_server.cpp
-    src/seed/seed_reader.cpp
-    src/seed/seed_writer.cpp
 )
-target_link_libraries(thinbt_daemon PUBLIC thinbt_cdc)
+target_link_libraries(thinbt_daemon PUBLIC thinbt_cdc thinbt_seed)
 
 # Daemon executable
 add_executable(thinbtd src/daemon/main.cpp)
@@ -60,3 +65,6 @@ function(add_thinbt_test name)
     target_link_libraries(${name} thinbt_daemon)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
+
+add_thinbt_test(test_seed)
+target_link_libraries(test_seed thinbt_seed)

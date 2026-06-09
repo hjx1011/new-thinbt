@@ -1,2 +1,0 @@
-/usr/bin/ar qc libthinbt_seed.a CMakeFiles/thinbt_seed.dir/src/seed/seed_reader.cpp.o CMakeFiles/thinbt_seed.dir/src/seed/seed_writer.cpp.o
-/usr/bin/ranlib libthinbt_seed.a

@@ -6,7 +6,6 @@
 #include "chunk_assembler.hpp"
 #include "io_worker.hpp"
 #include "scheduler.hpp"
-#include "peer_manager.hpp"
 #include "tracker_server.hpp"
 #include <memory>
 #include <string>
@@ -53,7 +52,6 @@ private:
         std::unique_ptr<IOWorkerPool> io_pool;
         std::vector<ChunkCompleteMsg> completions;
         std::unique_ptr<Scheduler> scheduler;
-        std::unique_ptr<PeerManager> peer_mgr;
 
         uint64_t bytes_done = 0;
         double speed_ema = 0.0;

@@ -63,8 +63,7 @@ std::string TaskManager::cmd_add(const std::string& seed_path, const std::string
         [](uint32_t){});
 
     // Peer Manager
-    task->peer_mgr = std::make_unique<PeerManager>(*task->scheduler,
-        task->seed->info_hash, 1000);
+    // PeerManager is global (one per daemon), not per-task
 
     tasks_[tid] = std::move(task);
     return R"({"status":"ok","data":{"task_id":")" + tid + R"("}})";

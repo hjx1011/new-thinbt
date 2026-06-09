@@ -19,6 +19,7 @@ struct PieceTask {
     uint32_t begin;
     uint32_t length;
     const uint8_t* data;
+    std::shared_ptr<std::vector<uint8_t>> owner;  // 持有数据所有权，零额外拷贝
 };
 
 class IOWorkerPool {

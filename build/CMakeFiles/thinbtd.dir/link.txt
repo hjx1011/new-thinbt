@@ -1,1 +1,0 @@
-/usr/bin/c++ -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/thinbtd.dir/link.d CMakeFiles/thinbtd.dir/src/daemon/main.cpp.o -o thinbtd  libthinbt_daemon.a libthinbt_cdc.a libthinbt_seed.a libthinbt_common.a /usr/lib/x86_64-linux-gnu/libssl.so /usr/lib/x86_64-linux-gnu/libcrypto.so

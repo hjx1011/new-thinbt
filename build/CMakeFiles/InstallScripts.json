@@ -1,0 +1,8 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/thinbt/new thinbt/build/cmake_install.cmake",
+		"/home/thinbt/new thinbt/build/third_party/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

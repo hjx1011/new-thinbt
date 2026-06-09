@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 99)
 
+find_package(OpenSSL REQUIRED)
+
 # Third-party header-only libraries
 add_subdirectory(third_party)
 

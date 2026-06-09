@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+namespace thinbt {
+
 #pragma pack(push, 1)
 
 struct TSeedHeader {
@@ -28,30 +30,30 @@ struct TSeedHeader {
 
     void to_host_endian()
     {
-        magic          = thinbt::ntoh32(magic);
-        version        = thinbt::ntoh16(version);
-        flags          = thinbt::ntoh16(flags);
-        chunk_count    = thinbt::ntoh32(chunk_count);
-        file_size      = thinbt::ntoh64(file_size);
-        min_chunk_size = thinbt::ntoh32(min_chunk_size);
-        avg_chunk_size = thinbt::ntoh32(avg_chunk_size);
-        max_chunk_size = thinbt::ntoh32(max_chunk_size);
-        file_name_len  = thinbt::ntoh32(file_name_len);
-        announce_len   = thinbt::ntoh32(announce_len);
+        magic          = ntoh32(magic);
+        version        = ntoh16(version);
+        flags          = ntoh16(flags);
+        chunk_count    = ntoh32(chunk_count);
+        file_size      = ntoh64(file_size);
+        min_chunk_size = ntoh32(min_chunk_size);
+        avg_chunk_size = ntoh32(avg_chunk_size);
+        max_chunk_size = ntoh32(max_chunk_size);
+        file_name_len  = ntoh32(file_name_len);
+        announce_len   = ntoh32(announce_len);
     }
 
     void to_network_endian()
     {
-        magic          = thinbt::hton32(magic);
-        version        = thinbt::hton16(version);
-        flags          = thinbt::hton16(flags);
-        chunk_count    = thinbt::hton32(chunk_count);
-        file_size      = thinbt::hton64(file_size);
-        min_chunk_size = thinbt::hton32(min_chunk_size);
-        avg_chunk_size = thinbt::hton32(avg_chunk_size);
-        max_chunk_size = thinbt::hton32(max_chunk_size);
-        file_name_len  = thinbt::hton32(file_name_len);
-        announce_len   = thinbt::hton32(announce_len);
+        magic          = hton32(magic);
+        version        = hton16(version);
+        flags          = hton16(flags);
+        chunk_count    = hton32(chunk_count);
+        file_size      = hton64(file_size);
+        min_chunk_size = hton32(min_chunk_size);
+        avg_chunk_size = hton32(avg_chunk_size);
+        max_chunk_size = hton32(max_chunk_size);
+        file_name_len  = hton32(file_name_len);
+        announce_len   = hton32(announce_len);
     }
 };
 
@@ -64,14 +66,14 @@ struct ChunkEntry {
 
     void to_host_endian()
     {
-        offset = thinbt::ntoh64(offset);
-        length = thinbt::ntoh32(length);
+        offset = ntoh64(offset);
+        length = ntoh32(length);
     }
 
     void to_network_endian()
     {
-        offset = thinbt::hton64(offset);
-        length = thinbt::hton32(length);
+        offset = hton64(offset);
+        length = hton32(length);
     }
 };
 
@@ -80,13 +82,15 @@ static_assert(sizeof(ChunkEntry) == 44, "ChunkEntry must be 44 bytes");
 #pragma pack(pop)
 
 struct TSeedFile {
-    TSeedHeader           header;
-    std::string           file_name;
-    std::string           announce_url;
+    TSeedHeader            header;
+    std::string            file_name;
+    std::string            announce_url;
     std::vector<ChunkEntry> chunks;
-    thinbt::Sha1Digest   info_hash;
+    Sha1Digest             info_hash;
 
-    thinbt::Sha1Digest compute_info_hash() const;
+    Sha1Digest compute_info_hash() const;
 };
+
+} // namespace thinbt
 
 #endif

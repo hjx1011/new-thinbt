@@ -1,0 +1,2 @@
+/usr/bin/ar qc libthinbt_common.a CMakeFiles/thinbt_common.dir/src/common/hash.cpp.o CMakeFiles/thinbt_common.dir/src/common/file_util.cpp.o CMakeFiles/thinbt_common.dir/src/common/net_util.cpp.o
+/usr/bin/ranlib libthinbt_common.a

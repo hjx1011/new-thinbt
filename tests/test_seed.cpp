@@ -3,6 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include <cstring>
+#include <memory>
 
 // Forward declarations (defined in seed_reader.cpp / seed_writer.cpp)
 namespace thinbt {

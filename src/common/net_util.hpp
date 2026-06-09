@@ -1,31 +1,23 @@
 #ifndef THINBT_NET_UTIL_HPP
 #define THINBT_NET_UTIL_HPP
 
+#include "platform.hpp"
 #include <string>
 #include <vector>
+#include <cstdint>
 
 namespace thinbt {
 
 struct TrackerUrl {
-    std::string protocol;   // "http" or "https"
     std::string host;
-    uint16_t    port = 0;
-    std::string path;
-    std::string info_hash_hex;
+    uint16_t port = 8080;
 };
 
-std::string resolve_addr(const std::string& host, uint16_t port);
+bool resolve_addr(const std::string& host, uint16_t port, struct sockaddr_in& addr);
 std::string get_local_ip();
-
-// 检测本机网络链路速率（Mbps），千兆=1000，百兆=100
-int detect_link_speed_mbps();
-
-// 生成 20 字节随机 peer_id
-std::string generate_peer_id();
-
-// 解析 tracker URL，提取 host/port/path/info_hash
-bool parse_tracker_url(const std::string& url, TrackerUrl& out);
+uint32_t detect_link_speed_mbps();
+std::vector<uint8_t> generate_peer_id();
+bool parse_tracker_url(const std::string& url, TrackerUrl& result);
 
 } // namespace thinbt
-
 #endif

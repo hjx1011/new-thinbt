@@ -3,6 +3,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <cstring>
+#include <memory>
 
 namespace thinbt {
 

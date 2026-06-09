@@ -1,0 +1,2 @@
+/usr/bin/ar qc libthinbt_cdc.a CMakeFiles/thinbt_cdc.dir/src/cdc/fastcdc.cpp.o
+/usr/bin/ranlib libthinbt_cdc.a

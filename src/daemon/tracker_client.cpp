@@ -24,7 +24,7 @@ void TrackerClient::do_announce(std::string host, uint16_t port, OnPeers on_peer
 
     asio::async_connect(*sock, endpoints,
         [self, sock, on_peers = std::move(on_peers), host, port](asio::error_code ec, auto) mutable {
-            if (ec) { self->schedule_retry(std::move(on_peers)); return; }
+            if (ec) { self->schedule_retry(std::move(on_peers), host, port); return; }
 
             std::ostringstream req;
             req << "{\"op\":\"announce\",\"info_hash\":\"" << self->info_hash_hex_
@@ -34,12 +34,12 @@ void TrackerClient::do_announce(std::string host, uint16_t port, OnPeers on_peer
 
             asio::async_write(*sock, asio::buffer(*req_str),
                 [self, sock, req_str, on_peers = std::move(on_peers), host, port](asio::error_code ec2, size_t) mutable {
-                    if (ec2) { self->schedule_retry(std::move(on_peers)); return; }
+                    if (ec2) { self->schedule_retry(std::move(on_peers), host, port); return; }
 
                     auto buf = std::make_shared<std::vector<uint8_t>>(4096);
                     sock->async_read_some(asio::buffer(*buf),
                         [self, sock, buf, on_peers = std::move(on_peers), host, port](asio::error_code ec3, size_t len) mutable {
-                            if (ec3) { self->schedule_retry(std::move(on_peers)); return; }
+                            if (ec3) { self->schedule_retry(std::move(on_peers), host, port); return; }
 
                             std::string resp(reinterpret_cast<char*>(buf->data()), len);
                             std::vector<PexPeer> peers;
@@ -75,7 +75,7 @@ void TrackerClient::do_announce(std::string host, uint16_t port, OnPeers on_peer
                             }
 
                             if (peers.empty())
-                                self->schedule_retry(std::move(on_peers));
+                                self->schedule_retry(std::move(on_peers), host, port);
                             else
                                 on_peers(peers);
                         });
@@ -83,13 +83,13 @@ void TrackerClient::do_announce(std::string host, uint16_t port, OnPeers on_peer
         });
 }
 
-void TrackerClient::schedule_retry(OnPeers on_peers) {
+void TrackerClient::schedule_retry(OnPeers on_peers, std::string host, uint16_t port) {
     if (!retry_enabled_ || retry_count_ >= MAX_RETRIES) return;
     retry_count_++;
     auto self = shared_from_this();
     auto timer = std::make_shared<asio::steady_timer>(io_, std::chrono::seconds(30));
-    timer->async_wait([self, on_peers = std::move(on_peers)](asio::error_code) mutable {
-        self->do_announce("192.168.177.56", 8080, std::move(on_peers));
+    timer->async_wait([self, on_peers = std::move(on_peers), host = std::move(host), port](asio::error_code) mutable {
+        self->do_announce(std::move(host), port, std::move(on_peers));
     });
 }
 

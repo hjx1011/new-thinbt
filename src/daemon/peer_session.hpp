@@ -11,6 +11,7 @@
 #include <array>
 #include <functional>
 #include <cstdint>
+#include <set>
 
 namespace thinbt {
 
@@ -70,7 +71,10 @@ private:
     void handle_bitfield_msg(const uint8_t* data, uint32_t len);
     void handle_request_msg(const uint8_t* data);
     void handle_piece_msg(const uint8_t* data, uint32_t len);
+    void handle_cancel_msg(const uint8_t* data);
     void handle_pex_msg(const uint8_t* data, uint32_t len);
+
+    std::set<std::pair<uint32_t, uint32_t>> cancelled_set_; // {chunk_idx, begin}
 
     void do_write();
 

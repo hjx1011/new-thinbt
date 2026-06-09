@@ -4,6 +4,8 @@
 #include "tracker_client.hpp"
 #include "scheduler.hpp"
 #include "io_worker.hpp"
+#include "common/hash.hpp"
+#include "common/net_util.hpp"
 #include <asio.hpp>
 #include <iostream>
 #include <csignal>
@@ -13,6 +15,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <thread>
+#include <map>
 
 using namespace thinbt;
 
@@ -43,7 +46,7 @@ int main(int argc, char* argv[]) {
     signal(SIGINT, [](int) { running.store(false); });
     signal(SIGTERM, [](int) { running.store(false); });
 
-    // ── IPC TCP listener (simple, non-Asio) ──
+    // ── IPC TCP listener ──
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     int opt = 1;
     setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -59,11 +62,18 @@ int main(int argc, char* argv[]) {
     asio::steady_timer heartbeat(ioc, std::chrono::milliseconds(100));
     uint64_t tick_count = 0;
 
+    // Global Scheduler (shared across tasks)
+    auto global_sched = std::make_unique<Scheduler>();
+    global_sched->init(0, 1000,
+        [](uint32_t, uint32_t, uint32_t, uint32_t){},
+        [](uint32_t){});
+
+    // ── Heartbeat tick ──
     std::function<void(const asio::error_code&)> tick = [&](const asio::error_code& ec) {
         if (ec || !running.load()) return;
         tick_count++;
 
-        // Check IPC
+        // IPC: check for CLI commands
         fd_set rfds;
         FD_ZERO(&rfds);
         FD_SET(listen_fd, &rfds);
@@ -84,10 +94,23 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // Scheduler tick
         task_mgr.tick();
 
-        if (tick_count % 600 == 0) { /* PEX tick */ }
-        if (tick_count % 100 == 0) { /* Choke tick */ }
+        // Tracker announce (30s)
+        if (tick_count % 300 == 0) {
+            task_mgr.tick_tracker_announce(ioc);
+        }
+
+        // Choke evaluation (10s)
+        if (tick_count % 100 == 0) {
+            task_mgr.tick_choke_all();
+        }
+
+        // PEX Delta Gossip (60s)
+        if (tick_count % 600 == 0) {
+            task_mgr.tick_pex_all();
+        }
 
         heartbeat.expires_after(std::chrono::milliseconds(100));
         heartbeat.async_wait(tick);

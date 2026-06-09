@@ -22,7 +22,7 @@ public:
 
 private:
     void do_announce(std::string host, uint16_t port, OnPeers on_peers);
-    void schedule_retry(OnPeers on_peers);
+    void schedule_retry(OnPeers on_peers, std::string host, uint16_t port);
 
     asio::io_context& io_;
     std::string info_hash_hex_;

@@ -123,7 +123,7 @@ void PeerManager::tick_pex() {
             PexPeer p{};
             p.ip   = inet_addr(ip.c_str());
             p.port = htons(16889);
-            p.flags = 0x80;
+            p.flags |= 0x80; // preserve original flags, set "left" bit
             delta.push_back(p);
         }
 

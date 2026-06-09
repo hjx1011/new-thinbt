@@ -50,6 +50,7 @@ add_library(thinbt_daemon STATIC
     src/daemon/chunk_assembler.cpp
     src/daemon/io_worker.cpp
     src/daemon/scheduler.cpp
+    src/daemon/protocol.cpp
     src/daemon/peer_session.cpp
     src/daemon/peer_manager.cpp
     src/daemon/task_manager.cpp

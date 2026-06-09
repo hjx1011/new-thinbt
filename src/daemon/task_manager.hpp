@@ -12,7 +12,12 @@
 #include <map>
 #include <vector>
 
+namespace asio { class io_context; }
+
 namespace thinbt {
+
+class PeerManager;
+class TrackerClient;
 
 struct TaskInfo {
     std::string task_id;
@@ -38,6 +43,11 @@ public:
     TrackerServer& tracker() { return tracker_; }
     void tick();
 
+    // Periodic ticks called from heartbeat
+    void tick_tracker_announce(asio::io_context& io);
+    void tick_choke_all();
+    void tick_pex_all();
+
     static std::string gen_task_id();
 
 private:
@@ -52,6 +62,8 @@ private:
         std::unique_ptr<IOWorkerPool> io_pool;
         std::vector<ChunkCompleteMsg> completions;
         std::unique_ptr<Scheduler> scheduler;
+        std::unique_ptr<PeerManager> peer_mgr;
+        std::shared_ptr<TrackerClient> tracker_client;
 
         uint64_t bytes_done = 0;
         double speed_ema = 0.0;

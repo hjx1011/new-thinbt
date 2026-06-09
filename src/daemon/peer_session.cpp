@@ -110,13 +110,15 @@ void PeerSession::start_read_body(uint32_t body_len, P2PMsgId msg_id) {
 
 void PeerSession::dispatch_message(P2PMsgId id, const uint8_t* data, uint32_t len) {
     switch (id) {
-    case P2PMsgId::CHOKE:          am_choked_.store(true);  break;
-    case P2PMsgId::UNCHOKE:        am_choked_.store(false); break;
+    case P2PMsgId::CHOKE:          am_choked_.store(true, std::memory_order_release);  break;
+    case P2PMsgId::UNCHOKE:        am_choked_.store(false, std::memory_order_release); break;
+    case P2PMsgId::INTERESTED:     /* peer is interested in our data */ break;
+    case P2PMsgId::NOT_INTERESTED: /* peer not interested */           break;
     case P2PMsgId::HAVE:           handle_have_msg(data);   break;
     case P2PMsgId::BITFIELD:       handle_bitfield_msg(data, len); break;
     case P2PMsgId::REQUEST:        handle_request_msg(data); break;
     case P2PMsgId::PIECE:          handle_piece_msg(data, len); break;
-    case P2PMsgId::CANCEL:         break; // handled by Scheduler
+    case P2PMsgId::CANCEL:         handle_cancel_msg(data);  break;
     case P2PMsgId::PEX:            handle_pex_msg(data, len); break;
     default: break;
     }
@@ -135,21 +137,52 @@ void PeerSession::handle_bitfield_msg(const uint8_t* data, uint32_t len) {
 }
 
 void PeerSession::handle_request_msg(const uint8_t* data) {
-    if (am_choked_.load()) return;
+    if (am_choked_.load(std::memory_order_acquire)) return;
 
     uint32_t index, begin, length;
     memcpy(&index, data, 4);     index  = ntoh32(index);
     memcpy(&begin, data + 4, 4); begin  = ntoh32(begin);
     memcpy(&length, data + 8, 4); length = ntoh32(length);
 
-    uint64_t file_off = index * 131072ULL + begin; // 128KB chunk size
+    // CANCEL check — skip if this sub-block was cancelled (Endgame cleanup)
+    if (cancelled_set_.count({index, begin})) return;
+
+    uint64_t file_off = index * 131072ULL + begin; // 128KB avg chunk
 #ifdef __linux__
     if (file_fd_ >= 0) {
         off_t off = static_cast<off_t>(file_off);
         ::sendfile(socket_->native_handle(), file_fd_, &off, length);
     }
 #endif
-    // fallback: write from mmap if sendfile unavailable
+}
+
+void PeerSession::handle_cancel_msg(const uint8_t* data) {
+    uint32_t index, begin;
+    memcpy(&index, data, 4);     index = ntoh32(index);
+    memcpy(&begin, data + 4, 4); begin = ntoh32(begin);
+    cancelled_set_.insert({index, begin});
+}
+
+void PeerSession::handle_pex_msg(const uint8_t* data, uint32_t len) {
+    // PEX payload: [op:1][count:2][PexPeer × count]
+    if (len < 3) return;
+    uint8_t  op    = data[0];
+    uint16_t count; memcpy(&count, data + 1, 2); count = ntoh16(count);
+    if (len < 3u + count * 8) return;
+
+    for (uint16_t i = 0; i < count; i++) {
+        PexPeer p;
+        memcpy(&p, data + 3 + i * 8, 8);
+        p.ip   = ntoh32(p.ip);
+        p.port = ntoh16(p.port);
+        // If not "left" marker, try connecting
+        if (!(p.flags & 0x80) && scheduler_) {
+            struct in_addr ia; ia.s_addr = p.ip;
+            // PeerManager callback to connect_to would be set up via scheduler
+            // For now, parsed but connection deferred to PeerManager
+        }
+    }
+    (void)op; // 0x00=full, 0x01=delta
 }
 
 void PeerSession::handle_piece_msg(const uint8_t* data, uint32_t len) {
@@ -160,11 +193,6 @@ void PeerSession::handle_piece_msg(const uint8_t* data, uint32_t len) {
 
     PieceTask task{index, begin, len - 8, data + 8, nullptr};
     io_pool_->dispatch(task);
-}
-
-void PeerSession::handle_pex_msg(const uint8_t* data, uint32_t len) {
-    // Forwarded to PeerManager via callback
-    (void)data; (void)len;
 }
 
 void PeerSession::record_have(uint32_t chunk_idx) {

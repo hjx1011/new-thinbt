@@ -70,3 +70,8 @@ endfunction()
 
 add_thinbt_test(test_seed)
 target_link_libraries(test_seed thinbt_seed)
+
+add_thinbt_test(test_fastcdc)
+target_link_libraries(test_fastcdc thinbt_cdc)
+
+add_thinbt_test(test_chunk_assembler)

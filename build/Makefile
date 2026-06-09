@@ -217,6 +217,32 @@ test_seed/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_seed.dir/build.make CMakeFiles/test_seed.dir/build
 .PHONY : test_seed/fast
 
+#=============================================================================
+# Target rules for targets named test_fastcdc
+
+# Build rule for target.
+test_fastcdc: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_fastcdc
+.PHONY : test_fastcdc
+
+# fast build rule for target.
+test_fastcdc/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_fastcdc.dir/build.make CMakeFiles/test_fastcdc.dir/build
+.PHONY : test_fastcdc/fast
+
+#=============================================================================
+# Target rules for targets named test_chunk_assembler
+
+# Build rule for target.
+test_chunk_assembler: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_chunk_assembler
+.PHONY : test_chunk_assembler
+
+# fast build rule for target.
+test_chunk_assembler/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_chunk_assembler.dir/build.make CMakeFiles/test_chunk_assembler.dir/build
+.PHONY : test_chunk_assembler/fast
+
 src/cdc/fastcdc.o: src/cdc/fastcdc.cpp.o
 .PHONY : src/cdc/fastcdc.o
 
@@ -649,6 +675,54 @@ src/seed/seed_writer.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/thinbt_seed.dir/build.make CMakeFiles/thinbt_seed.dir/src/seed/seed_writer.cpp.s
 .PHONY : src/seed/seed_writer.cpp.s
 
+tests/test_chunk_assembler.o: tests/test_chunk_assembler.cpp.o
+.PHONY : tests/test_chunk_assembler.o
+
+# target to build an object file
+tests/test_chunk_assembler.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_chunk_assembler.dir/build.make CMakeFiles/test_chunk_assembler.dir/tests/test_chunk_assembler.cpp.o
+.PHONY : tests/test_chunk_assembler.cpp.o
+
+tests/test_chunk_assembler.i: tests/test_chunk_assembler.cpp.i
+.PHONY : tests/test_chunk_assembler.i
+
+# target to preprocess a source file
+tests/test_chunk_assembler.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_chunk_assembler.dir/build.make CMakeFiles/test_chunk_assembler.dir/tests/test_chunk_assembler.cpp.i
+.PHONY : tests/test_chunk_assembler.cpp.i
+
+tests/test_chunk_assembler.s: tests/test_chunk_assembler.cpp.s
+.PHONY : tests/test_chunk_assembler.s
+
+# target to generate assembly for a file
+tests/test_chunk_assembler.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_chunk_assembler.dir/build.make CMakeFiles/test_chunk_assembler.dir/tests/test_chunk_assembler.cpp.s
+.PHONY : tests/test_chunk_assembler.cpp.s
+
+tests/test_fastcdc.o: tests/test_fastcdc.cpp.o
+.PHONY : tests/test_fastcdc.o
+
+# target to build an object file
+tests/test_fastcdc.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_fastcdc.dir/build.make CMakeFiles/test_fastcdc.dir/tests/test_fastcdc.cpp.o
+.PHONY : tests/test_fastcdc.cpp.o
+
+tests/test_fastcdc.i: tests/test_fastcdc.cpp.i
+.PHONY : tests/test_fastcdc.i
+
+# target to preprocess a source file
+tests/test_fastcdc.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_fastcdc.dir/build.make CMakeFiles/test_fastcdc.dir/tests/test_fastcdc.cpp.i
+.PHONY : tests/test_fastcdc.cpp.i
+
+tests/test_fastcdc.s: tests/test_fastcdc.cpp.s
+.PHONY : tests/test_fastcdc.s
+
+# target to generate assembly for a file
+tests/test_fastcdc.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_fastcdc.dir/build.make CMakeFiles/test_fastcdc.dir/tests/test_fastcdc.cpp.s
+.PHONY : tests/test_fastcdc.cpp.s
+
 tests/test_seed.o: tests/test_seed.cpp.o
 .PHONY : tests/test_seed.o
 
@@ -683,6 +757,8 @@ help:
 	@echo "... rebuild_cache"
 	@echo "... test"
 	@echo "... tbt"
+	@echo "... test_chunk_assembler"
+	@echo "... test_fastcdc"
 	@echo "... test_seed"
 	@echo "... thinbt_cdc"
 	@echo "... thinbt_common"
@@ -743,6 +819,12 @@ help:
 	@echo "... src/seed/seed_writer.o"
 	@echo "... src/seed/seed_writer.i"
 	@echo "... src/seed/seed_writer.s"
+	@echo "... tests/test_chunk_assembler.o"
+	@echo "... tests/test_chunk_assembler.i"
+	@echo "... tests/test_chunk_assembler.s"
+	@echo "... tests/test_fastcdc.o"
+	@echo "... tests/test_fastcdc.i"
+	@echo "... tests/test_fastcdc.s"
 	@echo "... tests/test_seed.o"
 	@echo "... tests/test_seed.i"
 	@echo "... tests/test_seed.s"

@@ -17,10 +17,15 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
   /usr/include/asm-generic/types.h \
   /usr/include/assert.h \
   /usr/include/c++/15/array \
+  /usr/include/c++/15/backward/auto_ptr.h \
   /usr/include/c++/15/backward/binders.h \
   /usr/include/c++/15/bit \
+  /usr/include/c++/15/bits/align.h \
   /usr/include/c++/15/bits/alloc_traits.h \
+  /usr/include/c++/15/bits/allocated_ptr.h \
   /usr/include/c++/15/bits/allocator.h \
+  /usr/include/c++/15/bits/atomic_base.h \
+  /usr/include/c++/15/bits/atomic_lockfree_defines.h \
   /usr/include/c++/15/bits/basic_ios.h \
   /usr/include/c++/15/bits/basic_ios.tcc \
   /usr/include/c++/15/bits/basic_string.h \
@@ -61,6 +66,9 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
   /usr/include/c++/15/bits/range_access.h \
   /usr/include/c++/15/bits/refwrap.h \
   /usr/include/c++/15/bits/requires_hosted.h \
+  /usr/include/c++/15/bits/shared_ptr.h \
+  /usr/include/c++/15/bits/shared_ptr_atomic.h \
+  /usr/include/c++/15/bits/shared_ptr_base.h \
   /usr/include/c++/15/bits/std_abs.h \
   /usr/include/c++/15/bits/stl_algobase.h \
   /usr/include/c++/15/bits/stl_bvector.h \
@@ -70,12 +78,15 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
   /usr/include/c++/15/bits/stl_iterator_base_funcs.h \
   /usr/include/c++/15/bits/stl_iterator_base_types.h \
   /usr/include/c++/15/bits/stl_pair.h \
+  /usr/include/c++/15/bits/stl_raw_storage_iter.h \
+  /usr/include/c++/15/bits/stl_tempbuf.h \
   /usr/include/c++/15/bits/stl_uninitialized.h \
   /usr/include/c++/15/bits/stl_vector.h \
   /usr/include/c++/15/bits/streambuf.tcc \
   /usr/include/c++/15/bits/streambuf_iterator.h \
   /usr/include/c++/15/bits/string_view.tcc \
   /usr/include/c++/15/bits/stringfwd.h \
+  /usr/include/c++/15/bits/unique_ptr.h \
   /usr/include/c++/15/bits/uses_allocator.h \
   /usr/include/c++/15/bits/uses_allocator_args.h \
   /usr/include/c++/15/bits/utility.h \
@@ -97,8 +108,10 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
   /usr/include/c++/15/debug/assertions.h \
   /usr/include/c++/15/debug/debug.h \
   /usr/include/c++/15/exception \
+  /usr/include/c++/15/ext/aligned_buffer.h \
   /usr/include/c++/15/ext/alloc_traits.h \
   /usr/include/c++/15/ext/atomicity.h \
+  /usr/include/c++/15/ext/concurrence.h \
   /usr/include/c++/15/ext/numeric_traits.h \
   /usr/include/c++/15/ext/string_conversions.h \
   /usr/include/c++/15/ext/type_traits.h \
@@ -108,8 +121,11 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
   /usr/include/c++/15/iosfwd \
   /usr/include/c++/15/iostream \
   /usr/include/c++/15/istream \
+  /usr/include/c++/15/memory \
   /usr/include/c++/15/new \
   /usr/include/c++/15/ostream \
+  /usr/include/c++/15/pstl/execution_defs.h \
+  /usr/include/c++/15/pstl/glue_memory_defs.h \
   /usr/include/c++/15/pstl/pstl_config.h \
   /usr/include/c++/15/stdexcept \
   /usr/include/c++/15/streambuf \
@@ -264,6 +280,56 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
   /usr/lib/gcc/x86_64-linux-gnu/15/include/stddef.h \
   /usr/lib/gcc/x86_64-linux-gnu/15/include/stdint.h
 
+test_seed: /lib64/ld-linux-x86-64.so.2 \
+  /usr/lib/x86_64-linux-gnu/Scrt1.o \
+  /usr/lib/x86_64-linux-gnu/crti.o \
+  /usr/lib/x86_64-linux-gnu/crtn.o \
+  /usr/lib/x86_64-linux-gnu/libc.so \
+  /usr/lib/x86_64-linux-gnu/libgcc_s.so.1 \
+  /usr/lib/x86_64-linux-gnu/libm.so \
+  /usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o \
+  /usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o \
+  /usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a \
+  /usr/lib/gcc/x86_64-linux-gnu/15/libgcc_s.so \
+  /usr/lib/gcc/x86_64-linux-gnu/15/libstdc++.so \
+  /usr/lib/x86_64-linux-gnu/libc.so.6 \
+  /usr/lib/x86_64-linux-gnu/libc_nonshared.a \
+  /usr/lib/x86_64-linux-gnu/libcrypto.so \
+  /usr/lib/x86_64-linux-gnu/libm.so.6 \
+  /usr/lib/x86_64-linux-gnu/libmvec.so.1 \
+  /usr/lib/x86_64-linux-gnu/libssl.so \
+  /usr/lib/x86_64-linux-gnu/libz.so.1 \
+  /usr/lib/x86_64-linux-gnu/libzstd.so.1 \
+  CMakeFiles/test_seed.dir/tests/test_seed.cpp.o \
+  libthinbt_cdc.a \
+  libthinbt_common.a \
+  libthinbt_daemon.a \
+  libthinbt_seed.a
+
+
+libthinbt_seed.a:
+
+CMakeFiles/test_seed.dir/tests/test_seed.cpp.o:
+
+/usr/lib/x86_64-linux-gnu/libz.so.1:
+
+/usr/lib/x86_64-linux-gnu/libssl.so:
+
+/usr/lib/x86_64-linux-gnu/libcrypto.so:
+
+/usr/lib/x86_64-linux-gnu/libc_nonshared.a:
+
+/usr/lib/x86_64-linux-gnu/libc.so.6:
+
+/usr/lib/x86_64-linux-gnu/libc.so:
+
+/usr/lib/x86_64-linux-gnu/crti.o:
+
+/usr/lib/x86_64-linux-gnu/Scrt1.o:
+
+/usr/lib/gcc/x86_64-linux-gnu/15/libstdc++.so:
+
+/lib64/ld-linux-x86-64.so.2:
 
 /usr/lib/gcc/x86_64-linux-gnu/15/include/stdint.h:
 
@@ -271,31 +337,47 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 
 /usr/include/x86_64-linux-gnu/sys/types.h:
 
-/usr/include/fcntl.h:
+/usr/include/x86_64-linux-gnu/sys/single_threaded.h:
 
-/usr/include/c++/15/vector:
+/usr/include/x86_64-linux-gnu/sys/sendfile.h:
 
-/usr/include/c++/15/bits/stl_iterator.h:
+/usr/include/x86_64-linux-gnu/sys/mman.h:
 
-/usr/include/c++/15/string:
+/usr/include/x86_64-linux-gnu/sys/cdefs.h:
 
-/usr/include/c++/15/stdexcept:
+/usr/include/x86_64-linux-gnu/gnu/stubs.h:
+
+/usr/lib/gcc/x86_64-linux-gnu/15/crtendS.o:
+
+/usr/include/x86_64-linux-gnu/gnu/stubs-64.h:
+
+/usr/include/x86_64-linux-gnu/c++/15/bits/gthr.h:
+
+/usr/include/x86_64-linux-gnu/c++/15/bits/gthr-default.h:
+
+/usr/include/x86_64-linux-gnu/c++/15/bits/error_constants.h:
+
+/usr/include/x86_64-linux-gnu/c++/15/bits/ctype_base.h:
+
+/usr/include/x86_64-linux-gnu/c++/15/bits/c++io.h:
 
 /usr/include/c++/15/pstl/pstl_config.h:
 
-/usr/include/c++/15/bits/invoke.h:
-
-/usr/include/x86_64-linux-gnu/bits/pthread_stack_min-dynamic.h:
-
-/usr/include/linux/errno.h:
-
-/usr/include/c++/15/new:
-
 /usr/include/x86_64-linux-gnu/bits/stat.h:
+
+/usr/include/c++/15/memory:
+
+/usr/include/c++/15/bits/stl_iterator.h:
+
+/usr/include/c++/15/vector:
 
 /usr/include/c++/15/iosfwd:
 
 /usr/include/x86_64-linux-gnu/bits/socket.h:
+
+/usr/include/c++/15/pstl/execution_defs.h:
+
+/usr/include/x86_64-linux-gnu/bits/wordsize.h:
 
 /usr/include/c++/15/ext/numeric_traits.h:
 
@@ -333,10 +415,6 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 
 /usr/include/x86_64-linux-gnu/bits/types/wint_t.h:
 
-/usr/include/c++/15/system_error:
-
-/usr/include/x86_64-linux-gnu/sys/cdefs.h:
-
 /usr/include/c++/15/cstdint:
 
 /usr/include/c++/15/ios:
@@ -351,6 +429,8 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 
 /usr/include/c++/15/cctype:
 
+libthinbt_cdc.a:
+
 /usr/include/c++/15/bits/stl_bvector.h:
 
 /usr/include/c++/15/bits/stl_pair.h:
@@ -359,7 +439,11 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 
 /usr/include/c++/15/bits/utility.h:
 
+/usr/lib/x86_64-linux-gnu/libgcc_s.so.1:
+
 /usr/include/linux/close_range.h:
+
+/usr/include/x86_64-linux-gnu/bits/types/timer_t.h:
 
 /usr/include/c++/15/bits/string_view.tcc:
 
@@ -373,37 +457,77 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 
 /usr/include/c++/15/cassert:
 
-/usr/include/c++/15/bits/stl_uninitialized.h:
-
 /usr/include/x86_64-linux-gnu/asm/errno.h:
 
 /usr/include/x86_64-linux-gnu/bits/types/struct_timeval.h:
 
-/usr/include/c++/15/bits/charconv.h:
+/usr/include/c++/15/bits/stl_tempbuf.h:
 
-/usr/include/c++/15/bits/istream.tcc:
+/usr/include/c++/15/bits/stl_raw_storage_iter.h:
+
+/usr/include/c++/15/stdexcept:
+
+/usr/include/c++/15/bits/stl_uninitialized.h:
+
+/usr/include/c++/15/bits/shared_ptr_base.h:
+
+/usr/include/c++/15/bits/shared_ptr.h:
+
+/usr/include/c++/15/bits/stringfwd.h:
+
+/usr/include/c++/15/bits/refwrap.h:
+
+/usr/include/c++/15/type_traits:
+
+/usr/include/x86_64-linux-gnu/bits/sockaddr.h:
+
+/usr/include/c++/15/debug/debug.h:
+
+/usr/include/c++/15/bits/predefined_ops.h:
+
+/usr/include/c++/15/bits/postypes.h:
+
+/usr/include/x86_64-linux-gnu/asm/posix_types.h:
 
 /home/thinbt/new\ thinbt/src/common/hash.hpp:
 
-/usr/include/ctype.h:
+/usr/include/c++/15/bits/atomic_base.h:
 
-/usr/include/c++/15/bits/locale_facets.tcc:
+/usr/include/x86_64-linux-gnu/bits/types/cookie_io_functions_t.h:
 
-/usr/include/x86_64-linux-gnu/bits/sockaddr.h:
+/usr/include/x86_64-linux-gnu/bits/wchar.h:
+
+/usr/include/x86_64-linux-gnu/bits/mman-map-flags-generic.h:
+
+/usr/include/x86_64-linux-gnu/c++/15/bits/c++locale.h:
+
+/usr/include/c++/15/pstl/glue_memory_defs.h:
+
+/usr/include/c++/15/bits/exception_defines.h:
+
+/usr/include/c++/15/backward/auto_ptr.h:
+
+/usr/lib/x86_64-linux-gnu/libzstd.so.1:
+
+/usr/include/c++/15/bits/std_abs.h:
+
+/usr/include/c++/15/typeinfo:
 
 /usr/include/c++/15/bits/localefwd.h:
 
 /usr/include/c++/15/bits/basic_ios.tcc:
 
+/usr/lib/gcc/x86_64-linux-gnu/15/libgcc.a:
+
 /usr/include/c++/15/array:
 
 /usr/include/c++/15/tuple:
 
-/usr/include/c++/15/bits/exception_defines.h:
+/usr/include/x86_64-linux-gnu/bits/types/sigset_t.h:
 
-/usr/include/c++/15/bits/predefined_ops.h:
+/usr/include/asm-generic/bitsperlong.h:
 
-/usr/include/c++/15/debug/debug.h:
+/usr/include/asm-generic/types.h:
 
 /usr/include/asm-generic/errno-base.h:
 
@@ -413,43 +537,31 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 
 /usr/include/c++/15/bits/uses_allocator.h:
 
-/usr/include/x86_64-linux-gnu/c++/15/bits/gthr.h:
+/usr/include/x86_64-linux-gnu/c++/15/bits/os_defines.h:
 
-/usr/include/endian.h:
-
-/usr/include/stdint.h:
+/usr/include/c++/15/bits/new_allocator.h:
 
 /home/thinbt/new\ thinbt/tests/test_seed.cpp:
 
-/usr/include/c++/15/typeinfo:
+/usr/include/c++/15/bits/align.h:
 
-/usr/include/c++/15/bits/std_abs.h:
+/usr/include/x86_64-linux-gnu/bits/stdlib-float.h:
+
+/home/thinbt/new\ thinbt/src/seed/tseed.hpp:
+
+/usr/include/x86_64-linux-gnu/bits/uintn-identity.h:
+
+/usr/include/c++/15/ext/aligned_buffer.h:
+
+/usr/include/c++/15/cwctype:
+
+/usr/include/x86_64-linux-gnu/asm/types.h:
 
 /usr/include/alloca.h:
 
-/usr/include/c++/15/bits/stl_iterator_base_types.h:
-
-/usr/include/x86_64-linux-gnu/sys/single_threaded.h:
-
-/usr/include/stdc-predef.h:
-
-/usr/include/c++/15/streambuf:
-
-/usr/include/c++/15/bits/cpp_type_traits.h:
-
-/usr/include/c++/15/bits/basic_string.h:
-
-/usr/include/errno.h:
-
-/usr/include/c++/15/cstddef:
-
-/usr/include/c++/15/bits/exception_ptr.h:
-
-/usr/include/x86_64-linux-gnu/bits/types/struct_osockaddr.h:
-
-/usr/include/c++/15/backward/binders.h:
-
 /usr/include/c++/15/initializer_list:
+
+/usr/lib/x86_64-linux-gnu/libm.so:
 
 /usr/include/asm-generic/int-ll64.h:
 
@@ -459,63 +571,83 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 
 /usr/include/c++/15/bits/basic_string.tcc:
 
-/usr/include/c++/15/string_view:
+/usr/lib/x86_64-linux-gnu/libmvec.so.1:
 
-/usr/include/x86_64-linux-gnu/bits/long-double.h:
+/usr/include/c++/15/bits/stl_iterator_base_types.h:
 
-/usr/include/c++/15/bits/codecvt.h:
+/usr/include/stdc-predef.h:
 
-/usr/include/features-time64.h:
+/usr/include/c++/15/bits/charconv.h:
 
 /usr/include/asm-generic/socket.h:
 
 /usr/include/x86_64-linux-gnu/bits/types/__fpos64_t.h:
 
-/usr/include/c++/15/bits/stringfwd.h:
+/usr/include/c++/15/bits/codecvt.h:
 
-/usr/include/c++/15/compare:
+/usr/include/c++/15/ext/concurrence.h:
 
-/usr/include/c++/15/bits/cxxabi_forced.h:
+/usr/include/c++/15/bits/exception_ptr.h:
 
-/usr/include/c++/15/bits/ostream.h:
+/usr/include/x86_64-linux-gnu/c++/15/bits/cpu_defines.h:
 
-/usr/include/c++/15/bits/cxxabi_init_exception.h:
+/usr/include/x86_64-linux-gnu/bits/timesize.h:
 
-/usr/include/asm-generic/posix_types.h:
+/usr/include/c++/15/bits/uses_allocator_args.h:
 
-/usr/include/c++/15/bits/allocator.h:
+/usr/include/x86_64-linux-gnu/bits/types/struct_osockaddr.h:
 
-/usr/include/c++/15/bit:
+/usr/include/c++/15/backward/binders.h:
 
-/usr/include/pthread.h:
+/usr/include/c++/15/bits/cpp_type_traits.h:
+
+/usr/include/c++/15/bits/basic_string.h:
+
+/usr/include/c++/15/streambuf:
+
+/usr/include/c++/15/bits/allocated_ptr.h:
+
+/usr/include/c++/15/bits/istream.tcc:
+
+/usr/include/c++/15/bits/shared_ptr_atomic.h:
+
+/usr/include/c++/15/bits/atomic_lockfree_defines.h:
 
 /usr/include/c++/15/bits/memory_resource.h:
 
 /usr/include/x86_64-linux-gnu/bits/waitstatus.h:
 
-/usr/include/c++/15/iostream:
+/usr/include/c++/15/compare:
+
+/usr/include/c++/15/bits/cxxabi_forced.h:
 
 /usr/include/c++/15/bits/vector.tcc:
 
-/usr/include/x86_64-linux-gnu/bits/mman-map-flags-generic.h:
+/usr/include/c++/15/iostream:
 
-/usr/include/asm-generic/types.h:
-
-/usr/include/asm-generic/bitsperlong.h:
-
-/usr/include/x86_64-linux-gnu/bits/types/sigset_t.h:
+/usr/include/assert.h:
 
 /usr/include/c++/15/fstream:
 
-/usr/include/assert.h:
+/usr/include/c++/15/bits/ostream.h:
+
+/usr/include/c++/15/bits/cxxabi_init_exception.h:
+
+/usr/include/c++/15/bits/locale_facets.tcc:
+
+/usr/include/ctype.h:
+
+/usr/include/c++/15/bits/allocator.h:
+
+/usr/include/asm-generic/posix_types.h:
+
+/usr/include/c++/15/bit:
+
+/usr/include/pthread.h:
 
 /home/thinbt/new\ thinbt/src/common/platform.hpp:
 
 /usr/include/x86_64-linux-gnu/bits/types/time_t.h:
-
-/usr/include/c++/15/bits/refwrap.h:
-
-/usr/include/c++/15/type_traits:
 
 /usr/include/c++/15/bits/hash_bytes.h:
 
@@ -525,27 +657,55 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 
 /usr/include/c++/15/bits/fstream.tcc:
 
+/usr/include/c++/15/bits/invoke.h:
+
+/usr/include/c++/15/new:
+
+/usr/include/linux/errno.h:
+
+/usr/include/x86_64-linux-gnu/bits/pthread_stack_min-dynamic.h:
+
 /usr/include/c++/15/bits/alloc_traits.h:
 
 /usr/include/c++/15/bits/ios_base.h:
 
 /usr/include/wchar.h:
 
-/usr/include/c++/15/bits/postypes.h:
-
-/usr/include/x86_64-linux-gnu/asm/posix_types.h:
+/usr/include/c++/15/bits/unique_ptr.h:
 
 /usr/include/asm-generic/sockios.h:
 
-/usr/include/c++/15/ext/string_conversions.h:
+/usr/include/x86_64-linux-gnu/c++/15/bits/ctype_inline.h:
 
-/usr/include/x86_64-linux-gnu/gnu/stubs-64.h:
+/usr/include/c++/15/bits/move.h:
+
+/usr/include/c++/15/ext/string_conversions.h:
 
 /usr/include/c++/15/bits/ostream.tcc:
 
 /usr/include/c++/15/bits/ostream_insert.h:
 
 /usr/include/x86_64-linux-gnu/bits/errno.h:
+
+/usr/include/c++/15/string:
+
+/usr/include/x86_64-linux-gnu/bits/long-double.h:
+
+/usr/include/c++/15/string_view:
+
+/usr/include/c++/15/system_error:
+
+/usr/include/stdint.h:
+
+/usr/include/endian.h:
+
+/usr/include/c++/15/cstddef:
+
+/usr/include/errno.h:
+
+/usr/include/fcntl.h:
+
+/usr/include/features-time64.h:
 
 /usr/include/x86_64-linux-gnu/bits/in.h:
 
@@ -554,8 +714,6 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 /usr/include/linux/openat2.h:
 
 /usr/include/linux/posix_types.h:
-
-/usr/include/x86_64-linux-gnu/c++/15/bits/gthr-default.h:
 
 /usr/include/c++/15/bits/nested_exception.h:
 
@@ -570,6 +728,8 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 /usr/include/c++/15/debug/assertions.h:
 
 /usr/include/x86_64-linux-gnu/asm/bitsperlong.h:
+
+/usr/lib/gcc/x86_64-linux-gnu/15/crtbeginS.o:
 
 /usr/include/c++/15/bits/range_access.h:
 
@@ -590,6 +750,10 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 /usr/include/stdio.h:
 
 /usr/include/stdlib.h:
+
+/usr/include/x86_64-linux-gnu/sys/select.h:
+
+/usr/include/x86_64-linux-gnu/asm/socket.h:
 
 /usr/include/c++/15/ostream:
 
@@ -619,17 +783,9 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 
 /usr/include/x86_64-linux-gnu/bits/stdint-uintn.h:
 
-/usr/include/x86_64-linux-gnu/asm/socket.h:
-
-/usr/include/x86_64-linux-gnu/sys/select.h:
-
 /usr/include/x86_64-linux-gnu/bits/types/__FILE.h:
 
 /usr/include/x86_64-linux-gnu/asm/sockios.h:
-
-/usr/include/c++/15/cwctype:
-
-/usr/include/x86_64-linux-gnu/asm/types.h:
 
 /usr/include/x86_64-linux-gnu/bits/byteswap.h:
 
@@ -640,8 +796,6 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 /usr/include/x86_64-linux-gnu/bits/cpu-set.h:
 
 /usr/include/x86_64-linux-gnu/bits/endian.h:
-
-/usr/include/x86_64-linux-gnu/gnu/stubs.h:
 
 /usr/include/x86_64-linux-gnu/bits/endianness.h:
 
@@ -659,13 +813,11 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 
 /usr/include/x86_64-linux-gnu/bits/libc-header-start.h:
 
+/usr/lib/x86_64-linux-gnu/libm.so.6:
+
 /usr/include/c++/15/bits/basic_ios.h:
 
 /usr/include/x86_64-linux-gnu/bits/locale.h:
-
-/usr/include/c++/15/bits/move.h:
-
-/usr/include/x86_64-linux-gnu/c++/15/bits/ctype_inline.h:
 
 /usr/include/x86_64-linux-gnu/bits/mman-shared.h:
 
@@ -677,9 +829,9 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 
 /usr/include/x86_64-linux-gnu/bits/pthreadtypes.h:
 
-/usr/include/x86_64-linux-gnu/bits/sched.h:
+libthinbt_daemon.a:
 
-/usr/include/x86_64-linux-gnu/c++/15/bits/ctype_base.h:
+/usr/include/x86_64-linux-gnu/bits/sched.h:
 
 /usr/include/x86_64-linux-gnu/bits/time.h:
 
@@ -688,6 +840,8 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 /usr/include/c++/15/bits/streambuf_iterator.h:
 
 /usr/include/x86_64-linux-gnu/bits/struct_stat.h:
+
+/usr/lib/gcc/x86_64-linux-gnu/15/libgcc_s.so:
 
 /usr/include/c++/15/bits/stl_construct.h:
 
@@ -703,15 +857,7 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 
 /usr/include/x86_64-linux-gnu/bits/types/FILE.h:
 
-/usr/include/c++/15/bits/new_allocator.h:
-
-/usr/include/x86_64-linux-gnu/c++/15/bits/os_defines.h:
-
-/usr/include/x86_64-linux-gnu/bits/stdlib-float.h:
-
-/home/thinbt/new\ thinbt/src/seed/tseed.hpp:
-
-/usr/include/x86_64-linux-gnu/bits/uintn-identity.h:
+libthinbt_common.a:
 
 /usr/include/x86_64-linux-gnu/bits/struct_mutex.h:
 
@@ -720,10 +866,6 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 /usr/include/x86_64-linux-gnu/bits/types/__fpos_t.h:
 
 /usr/include/x86_64-linux-gnu/bits/types/__mbstate_t.h:
-
-/usr/include/x86_64-linux-gnu/bits/types/cookie_io_functions_t.h:
-
-/usr/include/x86_64-linux-gnu/bits/wchar.h:
 
 /usr/include/c++/15/bits/stl_vector.h:
 
@@ -751,17 +893,13 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 
 /usr/include/x86_64-linux-gnu/bits/types/struct_tm.h:
 
-/usr/include/x86_64-linux-gnu/bits/types/timer_t.h:
-
 /usr/include/x86_64-linux-gnu/bits/typesizes.h:
-
-/usr/include/x86_64-linux-gnu/c++/15/bits/c++io.h:
 
 /usr/include/x86_64-linux-gnu/bits/unistd_ext.h:
 
-/usr/include/x86_64-linux-gnu/bits/waitflags.h:
+/usr/lib/x86_64-linux-gnu/crtn.o:
 
-/usr/include/x86_64-linux-gnu/bits/wordsize.h:
+/usr/include/x86_64-linux-gnu/bits/waitflags.h:
 
 /usr/include/x86_64-linux-gnu/c++/15/bits/atomic_word.h:
 
@@ -774,17 +912,3 @@ CMakeFiles/test_seed.dir/tests/test_seed.cpp.o: /home/thinbt/new\ thinbt/tests/t
 /usr/lib/gcc/x86_64-linux-gnu/15/include/stddef.h:
 
 /usr/include/x86_64-linux-gnu/c++/15/bits/c++config.h:
-
-/usr/include/x86_64-linux-gnu/c++/15/bits/c++locale.h:
-
-/usr/include/c++/15/bits/uses_allocator_args.h:
-
-/usr/include/x86_64-linux-gnu/bits/timesize.h:
-
-/usr/include/x86_64-linux-gnu/c++/15/bits/cpu_defines.h:
-
-/usr/include/x86_64-linux-gnu/c++/15/bits/error_constants.h:
-
-/usr/include/x86_64-linux-gnu/sys/mman.h:
-
-/usr/include/x86_64-linux-gnu/sys/sendfile.h:

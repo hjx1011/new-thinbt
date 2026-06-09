@@ -5,6 +5,8 @@
 /home/thinbt/new thinbt/build/CMakeFiles/thinbtd.dir
 /home/thinbt/new thinbt/build/CMakeFiles/tbt.dir
 /home/thinbt/new thinbt/build/CMakeFiles/test_seed.dir
+/home/thinbt/new thinbt/build/CMakeFiles/test_fastcdc.dir
+/home/thinbt/new thinbt/build/CMakeFiles/test_chunk_assembler.dir
 /home/thinbt/new thinbt/build/CMakeFiles/test.dir
 /home/thinbt/new thinbt/build/CMakeFiles/edit_cache.dir
 /home/thinbt/new thinbt/build/CMakeFiles/rebuild_cache.dir

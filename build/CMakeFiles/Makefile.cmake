@@ -67,4 +67,6 @@ set(CMAKE_DEPEND_INFO_FILES
   "CMakeFiles/thinbtd.dir/DependInfo.cmake"
   "CMakeFiles/tbt.dir/DependInfo.cmake"
   "CMakeFiles/test_seed.dir/DependInfo.cmake"
+  "CMakeFiles/test_fastcdc.dir/DependInfo.cmake"
+  "CMakeFiles/test_chunk_assembler.dir/DependInfo.cmake"
   )

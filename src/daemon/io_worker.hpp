@@ -6,6 +6,7 @@
 #include <vector>
 #include <deque>
 #include <mutex>
+#include <condition_variable>
 #include <thread>
 #include <memory>
 #include <atomic>
@@ -42,6 +43,7 @@ private:
     struct WorkerQueue {
         std::deque<PieceTask> tasks;
         std::mutex mtx;
+        std::condition_variable cv;
     };
 
     uint32_t num_workers_ = 0;

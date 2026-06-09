@@ -6,5 +6,5 @@ CXX_DEFINES =
 
 CXX_INCLUDES = -I"/home/thinbt/new thinbt/src" -I"/home/thinbt/new thinbt/third_party/asio/asio/include" -I"/home/thinbt/new thinbt/third_party/yyjson"
 
-CXX_FLAGS = -std=gnu++17
+CXX_FLAGS = -O3 -DNDEBUG -std=gnu++17
 

@@ -1,1 +1,1 @@
-/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/test_seed.dir/link.d CMakeFiles/test_seed.dir/tests/test_seed.cpp.o -o test_seed  libthinbt_daemon.a libthinbt_seed.a libthinbt_cdc.a libthinbt_common.a /usr/lib/x86_64-linux-gnu/libssl.so /usr/lib/x86_64-linux-gnu/libcrypto.so
+/usr/bin/c++ -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/test_seed.dir/link.d CMakeFiles/test_seed.dir/tests/test_seed.cpp.o -o test_seed  libthinbt_daemon.a libthinbt_seed.a libthinbt_cdc.a libthinbt_common.a /usr/lib/x86_64-linux-gnu/libssl.so /usr/lib/x86_64-linux-gnu/libcrypto.so

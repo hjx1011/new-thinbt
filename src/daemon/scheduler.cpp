@@ -90,13 +90,19 @@ void Scheduler::tick() {
         uint32_t ci = missing[i].second;
         uint32_t peer = select_best_peer(ci);
         if (peer != UINT32_MAX) {
-            chunk_states_[ci] = ChunkState::REQUESTED;
             auto* p = peer_slot(peer);
             uint32_t cap = p ? p->pipeline_cap : 16;
-            for (uint32_t b = 0; b < 8 && p && p->pending_requests < cap; b++) {
-                issue_request_(peer, ci, b * SUB_BLOCK_SIZE, SUB_BLOCK_SIZE);
-                p->pending_requests++;
+            // 原子分配：只有当 Peer 剩余窗口能容纳整个 Chunk 的 sub-block 时才分配
+            // 防止提前 break 导致 part of chunk 丢失、永久卡死在 REQUESTED 状态
+            static constexpr uint32_t SUB_BLOCKS_PER_CHUNK = 8;
+            if (p && (cap - p->pending_requests) >= SUB_BLOCKS_PER_CHUNK) {
+                chunk_states_[ci] = ChunkState::REQUESTED;
+                for (uint32_t b = 0; b < SUB_BLOCKS_PER_CHUNK; b++) {
+                    issue_request_(peer, ci, b * SUB_BLOCK_SIZE, SUB_BLOCK_SIZE);
+                    p->pending_requests++;
+                }
             }
+            // 窗口不足则保留 MISSING，下次 tick 重新选 Peer
         }
     }
 }

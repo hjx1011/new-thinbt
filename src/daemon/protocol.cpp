@@ -65,12 +65,20 @@ std::vector<uint8_t> build_request(uint32_t index, uint32_t begin, uint32_t leng
 }
 
 std::vector<uint8_t> build_piece(uint32_t index, uint32_t begin, const uint8_t* data, uint32_t len) {
-    std::vector<uint8_t> payload(8 + len);
+    // 一次性分配最终 buffer，消灭临时 payload 的冗余拷贝
+    // 格式: [len_be:4][id:1][idx_be:4][beg_be:4][data:len]
+    uint32_t msg_len = 1 + 8 + len; // id + header + data
+    std::vector<uint8_t> buf(4 + msg_len);
+
+    uint32_t len_be = hton32(msg_len);
+    memcpy(buf.data(), &len_be, 4);
+    buf[4] = static_cast<uint8_t>(P2PMsgId::PIECE);
+
     uint32_t idx_be = hton32(index), beg_be = hton32(begin);
-    memcpy(payload.data(),     &idx_be, 4);
-    memcpy(payload.data() + 4, &beg_be, 4);
-    memcpy(payload.data() + 8, data, len);
-    return build_message(P2PMsgId::PIECE, payload.data(), 8 + len);
+    memcpy(buf.data() + 5,  &idx_be, 4);
+    memcpy(buf.data() + 9,  &beg_be, 4);
+    memcpy(buf.data() + 13, data, len);
+    return buf;
 }
 
 std::vector<uint8_t> build_cancel(uint32_t index, uint32_t begin, uint32_t length) {

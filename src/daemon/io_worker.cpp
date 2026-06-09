@@ -26,6 +26,10 @@ void IOWorkerPool::start(uint32_t num_workers,
 
 void IOWorkerPool::stop() {
     running_.store(false, std::memory_order_release);
+    // 唤醒所有等待的线程，让它们检查 running_ 并退出
+    for (auto& q : queues_) {
+        if (q) q->cv.notify_all();
+    }
     for (auto& t : threads_) {
         if (t.joinable()) t.join();
     }
@@ -37,8 +41,11 @@ void IOWorkerPool::dispatch(PieceTask task) {
     uint32_t slot_idx = task.begin / SUB_BLOCK_SIZE;
     uint32_t worker   = (task.chunk_idx ^ slot_idx) % num_workers_;
     auto& q = *queues_[worker];
-    std::lock_guard<std::mutex> lock(q.mtx);
-    q.tasks.push_back(task);
+    {
+        std::lock_guard<std::mutex> lock(q.mtx);
+        q.tasks.push_back(task);
+    }
+    q.cv.notify_one(); // 唤醒对应 worker
 }
 
 void IOWorkerPool::worker_loop(uint32_t worker_id) {
@@ -47,7 +54,11 @@ void IOWorkerPool::worker_loop(uint32_t worker_id) {
         PieceTask task;
         bool has_task = false;
         {
-            std::lock_guard<std::mutex> lock(q.mtx);
+            std::unique_lock<std::mutex> lock(q.mtx);
+            // 条件变量挂起，而非 yield 空转
+            q.cv.wait(lock, [&] {
+                return !q.tasks.empty() || !running_.load(std::memory_order_acquire);
+            });
             if (!q.tasks.empty()) {
                 task = q.tasks.front();
                 q.tasks.pop_front();
@@ -61,8 +72,6 @@ void IOWorkerPool::worker_loop(uint32_t worker_id) {
                 ChunkCompleteMsg msg{task.chunk_idx, 0};
                 on_complete_(msg);
             }
-        } else {
-            std::this_thread::yield();
         }
     }
 }

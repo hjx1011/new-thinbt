@@ -51,6 +51,7 @@ int main(int argc, char* argv[]) {
 
     signal(SIGINT, [](int) { running.store(false); });
     signal(SIGTERM, [](int) { running.store(false); });
+    signal(SIGPIPE, SIG_IGN);  // sendfile pool 用 raw ::send，对端断开会触发 SIGPIPE
 
     // ── Heartbeat timer (100ms) ──
     asio::steady_timer heartbeat(ioc, std::chrono::milliseconds(100));
@@ -61,6 +62,7 @@ int main(int argc, char* argv[]) {
         if (ec || !running.load()) return;
         tick_count++;
 
+        try {
         // Scheduler tick (100ms)
         task_mgr.tick();
 
@@ -84,13 +86,27 @@ int main(int argc, char* argv[]) {
             task_mgr.tick_pex_all();
         }
 
+        } catch (const std::exception& e) {
+            std::cerr << "[FATAL] tick exception: " << e.what() << std::endl;
+            running.store(false);
+            return;
+        }
+
         heartbeat.expires_after(std::chrono::milliseconds(100));
         heartbeat.async_wait(tick);
     };
     heartbeat.async_wait(tick);
 
     std::cout << "Event loop running..." << std::endl;
-    ioc.run();
+    try {
+        ioc.run();
+    } catch (const std::exception& e) {
+        std::cerr << "[FATAL] unhandled exception: " << e.what() << std::endl;
+        return 1;
+    } catch (...) {
+        std::cerr << "[FATAL] unknown exception" << std::endl;
+        return 1;
+    }
 
     std::cout << "thinbtd stopped." << std::endl;
     return 0;

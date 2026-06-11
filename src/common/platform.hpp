@@ -30,12 +30,18 @@
 #include <string>
 #include <vector>
 
-#ifdef _WIN32
+#if defined(_WIN32) && defined(_MSC_VER)
 using ssize_t = int64_t;
 using off_t   = int64_t;
 #endif
 
 namespace thinbt {
+
+#ifdef _WIN32
+using socket_handle_t = SOCKET;
+#else
+using socket_handle_t = int;
+#endif
 
 inline uint16_t ntoh16(uint16_t v) { return ntohs(v); }
 inline uint32_t ntoh32(uint32_t v) { return ntohl(v); }

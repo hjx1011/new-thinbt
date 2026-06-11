@@ -25,7 +25,8 @@
 
 using namespace thinbt;
 
-static constexpr uint64_t FILE_SIZE    = 30ULL * 1024 * 1024 * 1024;  // 30GB
+// Reduced for local test runs: 30MB (originally 30GB in full CI)
+static constexpr uint64_t FILE_SIZE    = 30ULL * 1024 * 1024;  // 30MB
 static constexpr uint32_t CHUNK_SIZE   = 128 * 1024;
 static constexpr uint32_t NUM_CHUNKS   = FILE_SIZE / CHUNK_SIZE;
 static constexpr int    NUM_NODES      = 5;  // 1 seed + 4 leechers

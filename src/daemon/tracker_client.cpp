@@ -41,7 +41,7 @@ std::vector<PexPeer> parse_tracker_response(const std::string& resp) {
         auto* flags_val = yyjson_obj_get(obj, "flags");
         PexPeer p{};
         p.ip    = inet_addr(yyjson_get_str(ip_val));
-        p.port  = static_cast<uint16_t>(yyjson_get_uint(port_val));
+        p.port  = htons(static_cast<uint16_t>(yyjson_get_uint(port_val)));
         p.flags = flags_val ? static_cast<uint8_t>(yyjson_get_uint(flags_val)) : 0;
         peers.push_back(p);
     }

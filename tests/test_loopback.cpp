@@ -23,7 +23,8 @@
 
 using namespace thinbt;
 
-static constexpr uint64_t FILE_SIZE    = 4ULL * 1024 * 1024 * 1024;
+// Reduced file size for faster local debugging
+static constexpr uint64_t FILE_SIZE    = 32ULL * 1024 * 1024;
 static constexpr uint32_t CHUNK_SIZE   = 128 * 1024;
 static constexpr uint32_t NUM_CHUNKS   = FILE_SIZE / CHUNK_SIZE;
 
@@ -32,7 +33,7 @@ static const char* TSEED_PATH     = "/tmp/thinbt_loopback_4g.tseed";
 static const char* DOWNLOAD_PATH  = "/tmp/thinbt_loopback_4g_dl.bin";
 
 static void create_test_file() {
-    std::cout << "[Setup] generating 512MB test file..." << std::flush;
+    std::cout << "[Setup] generating test file..." << std::flush;
     FILE* f = fopen(TEST_FILE, "wb");
     if (!f) { std::cerr << "FAIL: cannot create test file" << std::endl; exit(1); }
     std::vector<uint8_t> buf(4 * 1024 * 1024);

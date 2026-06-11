@@ -1,6 +1,7 @@
 #include "hash.hpp"
 
-#include <openssl/sha.h>
+#include <openssl/evp.h>
+#include <vector>
 
 #include <cstring>
 #include <sstream>
@@ -15,7 +16,9 @@ namespace thinbt {
 Sha256Digest sha256(const uint8_t* data, size_t len)
 {
     Sha256Digest d{};
-    SHA256(data, len, d.data());
+    unsigned int out_len = 0;
+    if (!EVP_Digest(data, len, d.data(), &out_len, EVP_sha256(), nullptr))
+        throw std::runtime_error("sha256: EVP_Digest failed");
     return d;
 }
 
@@ -28,20 +31,34 @@ Sha256Digest sha256_file(const std::string& path)
     size_t size = static_cast<size_t>(f.tellg());
     f.seekg(0, std::ios::beg);
 
-    SHA256_CTX ctx;
-    SHA256_Init(&ctx);
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    if (!ctx) throw std::runtime_error("sha256_file: EVP_MD_CTX_new failed");
+    if (EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr) != 1) {
+        EVP_MD_CTX_free(ctx);
+        throw std::runtime_error("sha256_file: EVP_DigestInit_ex failed");
+    }
 
     constexpr size_t BUF = 65536;
-    uint8_t buf[BUF];
+    std::vector<uint8_t> buf(BUF);
     while (size > 0) {
         size_t chunk = size > BUF ? BUF : size;
-        f.read(reinterpret_cast<char*>(buf), static_cast<std::streamsize>(chunk));
-        SHA256_Update(&ctx, buf, chunk);
-        size -= chunk;
+        f.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(chunk));
+        std::streamsize got = f.gcount();
+        if (got <= 0) break;
+        if (EVP_DigestUpdate(ctx, buf.data(), static_cast<size_t>(got)) != 1) {
+            EVP_MD_CTX_free(ctx);
+            throw std::runtime_error("sha256_file: EVP_DigestUpdate failed");
+        }
+        size -= static_cast<size_t>(got);
     }
 
     Sha256Digest d{};
-    SHA256_Final(d.data(), &ctx);
+    unsigned int out_len = 0;
+    if (EVP_DigestFinal_ex(ctx, d.data(), &out_len) != 1) {
+        EVP_MD_CTX_free(ctx);
+        throw std::runtime_error("sha256_file: EVP_DigestFinal_ex failed");
+    }
+    EVP_MD_CTX_free(ctx);
     return d;
 }
 
@@ -63,7 +80,9 @@ std::string sha256_hex(const Sha256Digest& d)
 Sha1Digest sha1(const uint8_t* data, size_t len)
 {
     Sha1Digest d{};
-    SHA1(data, len, d.data());
+    unsigned int out_len = 0;
+    if (!EVP_Digest(data, len, d.data(), &out_len, EVP_sha1(), nullptr))
+        throw std::runtime_error("sha1: EVP_Digest failed");
     return d;
 }
 

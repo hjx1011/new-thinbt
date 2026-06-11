@@ -1,6 +1,7 @@
 #include "chunk_assembler.hpp"
 #include <cstring>
 #include <algorithm>
+#include <iostream>
 
 namespace thinbt {
 
@@ -8,6 +9,9 @@ void ChunkAssembler::init(uint8_t* mmap_base, uint32_t chunk_size, uint32_t sub_
     base_ = mmap_base;
     chunk_size_ = chunk_size;
     sub_block_size_ = sub_block_size;
+
+    std::cerr << "[ChunkAssembler] init base=" << static_cast<const void*>(base_)
+              << " chunk_size=" << chunk_size_ << " sub_block_size=" << sub_block_size_ << std::endl;
 
     total_slots_ = (chunk_size + sub_block_size - 1) / sub_block_size;
     mask_words_ = (total_slots_ + 31) / 32;
@@ -26,6 +30,22 @@ bool ChunkAssembler::on_piece(uint32_t begin, const uint8_t* data, uint32_t len)
     uint32_t slot     = begin / sub_block_size_;
     uint32_t word     = slot / 32;
     uint32_t bit_mask = 1u << (slot % 32);
+
+    // Defensive checks: ensure base_ and ranges are valid to avoid SIGBUS
+    if (!base_) {
+        std::cerr << "[ChunkAssembler] ERROR: base_ is null" << std::endl;
+        return false;
+    }
+    if (begin + len > chunk_size_) {
+        std::cerr << "[ChunkAssembler] ERROR: write out-of-bounds begin=" << begin
+                  << " len=" << len << " chunk_size=" << chunk_size_ << std::endl;
+        return false;
+    }
+
+    if (len > sub_block_size_ || (begin % sub_block_size_) != 0) {
+        std::cerr << "[ChunkAssembler] WARN: unusual piece begin=" << begin
+                  << " len=" << len << " sub_block_size=" << sub_block_size_ << std::endl;
+    }
 
     // Write to mmap region (pure memory operation, nanosecond-scale)
     memcpy(base_ + begin, data, len);

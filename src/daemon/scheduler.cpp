@@ -19,6 +19,7 @@ void Scheduler::init(uint32_t total_chunks, uint32_t local_speed_mbps,
     chunk_sub_done_.resize(total_chunks);
     chunk_sub_req_.resize(total_chunks);
     chunk_sub_req_time_.resize(total_chunks);
+    chunk_sub_req_count_.resize(total_chunks, 0);
     chunk_sub_done_count_.resize(total_chunks, 0);
     missing_count_ = total_chunks;
     local_speed_mbps_ = local_speed_mbps;
@@ -34,6 +35,10 @@ void Scheduler::init(uint32_t total_chunks, uint32_t local_speed_mbps,
 
 void Scheduler::set_cancel_issuer(CancelIssuer cancel) {
     cancel_request_ = std::move(cancel);
+}
+
+void Scheduler::set_not_interested_issuer(NotInterestedIssuer issuer) {
+    not_interested_issuer_ = std::move(issuer);
 }
 
 void Scheduler::set_chunk_sizes(const std::vector<uint32_t>& sizes) {
@@ -55,6 +60,7 @@ void Scheduler::on_bitfield(uint32_t slot_id, const std::vector<bool>& bf) {
     p->remote_bitfield = bf;
     for (size_t i = 0; i < bf.size() && i < availability_.size(); i++)
         if (bf[i]) availability_[i]++;
+    check_peer_interest(slot_id);
 }
 
 void Scheduler::on_have(uint32_t slot_id, uint32_t chunk_idx) {
@@ -64,6 +70,7 @@ void Scheduler::on_have(uint32_t slot_id, uint32_t chunk_idx) {
         p->remote_bitfield[chunk_idx] = true;
         if (chunk_idx < availability_.size()) availability_[chunk_idx]++;
     }
+    check_peer_interest(slot_id);
 }
 
 void Scheduler::on_peer_added(uint32_t slot_id, uint32_t reported_speed) {
@@ -185,8 +192,7 @@ void Scheduler::tick() {
         if (ci >= chunk_states_.size()) continue;
         if (chunk_states_[ci] == ChunkState::COMPLETE) continue;
         uint32_t total = ci < chunk_sub_blocks_.size() ? chunk_sub_blocks_[ci] : 8;
-        uint32_t req_count = ci < chunk_sub_req_.size()
-            ? static_cast<uint32_t>(std::count(chunk_sub_req_[ci].begin(), chunk_sub_req_[ci].end(), true)) : 0;
+        uint32_t req_count = (ci < chunk_sub_req_count_.size()) ? chunk_sub_req_count_[ci] : 0;
         if (req_count >= total) {
             if (chunk_states_[ci] == ChunkState::MISSING) continue;
             continue;
@@ -219,6 +225,7 @@ void Scheduler::tick() {
                 if (!chunk_sub_req_[ci][b]) {
                     chunk_sub_req_[ci][b] = true;
                     chunk_sub_req_time_[ci][b] = now;
+                    if (ci < chunk_sub_req_count_.size()) chunk_sub_req_count_[ci]++;
                     uint32_t begin = b * SUB_BLOCK_SIZE;
                     issue_request_(peer, ci, begin, SUB_BLOCK_SIZE);
                     p->pending_requests++;
@@ -342,6 +349,9 @@ void Scheduler::process_completions(std::vector<ChunkCompleteMsg>& completions) 
         // Cancel 清理：排除赢家 Peer，取消其他所有还在传该 chunk 的冗余请求
         send_cancel_for_chunk(msg.chunk_idx, msg.winning_peer_slot);
 
+        // 重置该 chunk 的请求计数
+        if (msg.chunk_idx < chunk_sub_req_count_.size()) chunk_sub_req_count_[msg.chunk_idx] = 0;
+
         broadcast_have_(msg.chunk_idx);
     }
     completions.clear();
@@ -365,6 +375,7 @@ void Scheduler::on_verify_failed(uint32_t chunk_idx) {
         std::fill(chunk_sub_done_[chunk_idx].begin(), chunk_sub_done_[chunk_idx].end(), false);
     if (chunk_idx < chunk_sub_done_count_.size())
         chunk_sub_done_count_[chunk_idx] = 0;
+    if (chunk_idx < chunk_sub_req_count_.size()) chunk_sub_req_count_[chunk_idx] = 0;
 
     // 确保 chunk 在活跃列表中
     if (std::find(active_chunks_.begin(), active_chunks_.end(), chunk_idx) == active_chunks_.end())
@@ -380,11 +391,32 @@ void Scheduler::on_subblock_timeout(uint32_t chunk_idx, uint32_t begin) {
 
     uint32_t slot = begin / SUB_BLOCK_SIZE;
     if (chunk_idx < chunk_sub_req_.size() && slot < chunk_sub_req_[chunk_idx].size()) {
-        chunk_sub_req_[chunk_idx][slot] = false; // 标记为未请求，下一轮 tick 自动重发
+        if (chunk_sub_req_[chunk_idx][slot]) {
+            chunk_sub_req_[chunk_idx][slot] = false; // 标记为未请求，下一轮 tick 自动重发
+            if (chunk_idx < chunk_sub_req_count_.size() && chunk_sub_req_count_[chunk_idx] > 0)
+                chunk_sub_req_count_[chunk_idx]--;
+        }
     }
     if (chunk_idx < chunk_sub_req_time_.size() && slot < chunk_sub_req_time_[chunk_idx].size()) {
         chunk_sub_req_time_[chunk_idx][slot] = 0;
     }
+}
+
+void Scheduler::check_peer_interest(uint32_t slot_id) {
+    if (!not_interested_issuer_) return;
+    auto* p = peer_slot(slot_id);
+    if (!p) return;
+
+    // 检查 peer 是否有任何我们仍在缺失的 chunk
+    bool has_needed = false;
+    for (size_t i = 0; i < p->remote_bitfield.size() && i < chunk_states_.size(); i++) {
+        if (p->remote_bitfield[i] && chunk_states_[i] != ChunkState::COMPLETE) {
+            has_needed = true;
+            break;
+        }
+    }
+    if (!has_needed)
+        not_interested_issuer_(slot_id);
 }
 
 void Scheduler::mark_all_complete(const std::vector<bool>& bitfield) {
@@ -399,6 +431,7 @@ void Scheduler::mark_all_complete(const std::vector<bool>& bitfield) {
                     *it = active_chunks_.back();
                     active_chunks_.pop_back();
                 }
+                    if (i < chunk_sub_req_count_.size()) chunk_sub_req_count_[i] = 0;
             }
         }
     }

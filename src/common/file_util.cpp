@@ -8,6 +8,18 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <mswsock.h>
+#include <winioctl.h>
+#include <io.h>
+#ifndef FSCTL_DUPLICATE_EXTENTS_TO_FILE
+#define FSCTL_DUPLICATE_EXTENTS_TO_FILE CTL_CODE(FILE_DEVICE_FILE_SYSTEM, 209, METHOD_BUFFERED, FILE_WRITE_DATA)
+typedef struct _DUPLICATE_EXTENTS_DATA {
+    HANDLE FileHandle;
+    LARGE_INTEGER SourceFileOffset;
+    LARGE_INTEGER TargetFileOffset;
+    LARGE_INTEGER ByteCount;
+} DUPLICATE_EXTENTS_DATA, *PDUPLICATE_EXTENTS_DATA;
+#endif
 #else
 #include <sys/stat.h>
 #include <sys/sendfile.h>
@@ -158,8 +170,14 @@ void MappedFile::unmap() {
 
 bool MappedFile::preallocate(uint64_t size) {
 #ifdef _WIN32
-    (void)size;
-    return false; // Windows 下 create_and_map 已通过 SetEndOfFile 预分配
+    if (!file_handle_ || file_handle_ == INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER li;
+    li.QuadPart = static_cast<LONGLONG>(size);
+    if (!SetFilePointerEx(file_handle_, li, nullptr, FILE_BEGIN)) return false;
+    if (!SetEndOfFile(file_handle_)) return false;
+    SetFileValidData(file_handle_, li.QuadPart);
+    size_ = size;
+    return true;
 #else
     return ::fallocate(fd_, 0, 0, static_cast<off_t>(size)) == 0;
 #endif
@@ -176,8 +194,14 @@ bool MappedFile::advise_sequential(uint64_t offset, uint64_t len) {
 
 bool MappedFile::punch_hole(uint64_t offset, uint64_t len) {
 #ifdef _WIN32
-    (void)offset; (void)len;
-    return false; // Windows 稀疏文件需不同 API，暂不实现
+    if (!file_handle_ || file_handle_ == INVALID_HANDLE_VALUE) return false;
+    FILE_ZERO_DATA_INFORMATION info{};
+    info.FileOffset.QuadPart = static_cast<LONGLONG>(offset);
+    info.BeyondFinalZero.QuadPart = static_cast<LONGLONG>(offset + len);
+    DWORD returned = 0;
+    return DeviceIoControl(file_handle_, FSCTL_SET_ZERO_DATA,
+                           &info, sizeof(info), nullptr, 0,
+                           &returned, nullptr) != 0;
 #else
     return ::fallocate(fd_, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
                        static_cast<off_t>(offset), static_cast<off_t>(len)) == 0;
@@ -211,8 +235,19 @@ bool MappedFile::sync() {
 
 bool clone_range(int src_fd, uint64_t src_off, int dst_fd, uint64_t dst_off, uint64_t len) {
 #ifdef _WIN32
-    (void)src_fd; (void)src_off; (void)dst_fd; (void)dst_off; (void)len;
-    return false; // Windows 无 copy_file_range，应用层 mmap + memcpy 可替代
+    HANDLE src = reinterpret_cast<HANDLE>(_get_osfhandle(src_fd));
+    HANDLE dst = reinterpret_cast<HANDLE>(_get_osfhandle(dst_fd));
+    if (src == INVALID_HANDLE_VALUE || dst == INVALID_HANDLE_VALUE) return false;
+
+    DUPLICATE_EXTENTS_DATA data{};
+    data.FileHandle = src;
+    data.SourceFileOffset.QuadPart = static_cast<LONGLONG>(src_off);
+    data.TargetFileOffset.QuadPart = static_cast<LONGLONG>(dst_off);
+    data.ByteCount.QuadPart = static_cast<LONGLONG>(len);
+    DWORD returned = 0;
+    return DeviceIoControl(dst, FSCTL_DUPLICATE_EXTENTS_TO_FILE,
+                           &data, sizeof(data), nullptr, 0,
+                           &returned, nullptr) != 0;
 #else
     return ::copy_file_range(src_fd, reinterpret_cast<off64_t*>(&src_off),
                              dst_fd, reinterpret_cast<off64_t*>(&dst_off),
@@ -220,10 +255,20 @@ bool clone_range(int src_fd, uint64_t src_off, int dst_fd, uint64_t dst_off, uin
 #endif
 }
 
-ssize_t sendfile_zero_copy(int socket_fd, int file_fd, uint64_t& offset, size_t count) {
+ssize_t sendfile_zero_copy(socket_handle_t socket_fd, int file_fd, uint64_t& offset, size_t count) {
 #ifdef _WIN32
-    (void)socket_fd; (void)file_fd; (void)offset; (void)count;
-    return -1; // Windows 无 sendfile，需用 TransmitFile 或 mmap + send
+    HANDLE h = reinterpret_cast<HANDLE>(_get_osfhandle(file_fd));
+    if (h == INVALID_HANDLE_VALUE) return -1;
+
+    OVERLAPPED ov{};
+    ov.Offset = static_cast<DWORD>(offset & 0xFFFFFFFFu);
+    ov.OffsetHigh = static_cast<DWORD>(offset >> 32);
+
+    if (!::TransmitFile(socket_fd, h, static_cast<DWORD>(count), 0, &ov, nullptr, 0)) {
+        return -1;
+    }
+    offset += count;
+    return static_cast<ssize_t>(count);
 #else
     off_t off = static_cast<off_t>(offset);
     ssize_t n = ::sendfile(socket_fd, file_fd, &off, count);

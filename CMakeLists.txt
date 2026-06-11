@@ -32,7 +32,7 @@ target_link_libraries(thinbt_common PUBLIC
     yyjson
 )
 if(WIN32)
-    target_link_libraries(thinbt_common PUBLIC ws2_32 iphlpapi)
+    target_link_libraries(thinbt_common PUBLIC ws2_32 iphlpapi mswsock)
 endif()
 
 # CDC library (depends on common)
@@ -57,6 +57,8 @@ add_library(thinbt_daemon STATIC
     src/daemon/scheduler.cpp
     src/daemon/protocol.cpp
     src/daemon/peer_session.cpp
+    src/daemon/sendfile_pool.cpp
+    src/daemon/file_read_pool.cpp
     src/daemon/peer_manager.cpp
     src/daemon/task_manager.cpp
     src/daemon/ipc_server.cpp
@@ -89,6 +91,8 @@ add_thinbt_test(test_fastcdc)
 target_link_libraries(test_fastcdc thinbt_cdc)
 
 add_thinbt_test(test_chunk_assembler)
+
+add_thinbt_test(test_protocol)
 
 add_thinbt_test(test_segment_io)
 

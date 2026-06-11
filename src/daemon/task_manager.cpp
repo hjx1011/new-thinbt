@@ -42,7 +42,44 @@ std::string TaskManager::gen_task_id() {
 
 TaskManager::TaskManager(asio::io_context& io, uint16_t p2p_port,
                           const std::string& tracker_host, uint16_t tracker_port)
-    : io_(io), p2p_port_(p2p_port), tracker_host_(tracker_host), tracker_port_(tracker_port), tracker_(tracker_port) {}
+    : io_(io), p2p_port_(p2p_port), tracker_host_(tracker_host), tracker_port_(tracker_port), tracker_(tracker_port) {
+    // 启动周期性统计定时器
+    try {
+        stats_timer_ = std::make_unique<asio::steady_timer>(io_);
+        stats_timer_->expires_after(std::chrono::seconds(1));
+        stats_timer_->async_wait([this](const asio::error_code& ec){ this->do_stats_tick(ec); });
+    } catch (...) {
+        // 如果无法创建定时器则忽略（不应发生）
+    }
+}
+
+void TaskManager::do_stats_tick(const asio::error_code& ec) {
+    if (ec) return;
+    uint64_t total_kbps = 0;
+    std::ostringstream detail;
+    detail << "[stats]";
+    for (auto& [tid, t] : tasks_) {
+        if (!t->peer_mgr) continue;
+        for (auto& s : t->peer_mgr->sessions()) {
+            s->update_download_rate();
+            s->update_upload_rate();
+            uint32_t dl = s->download_rate_kbps();
+            uint32_t ul = s->upload_rate_kbps();
+            total_kbps += dl;
+            if (dl > 0 || ul > 0)
+                detail << " " << s->remote_ip() << ":dl=" << dl << "kbps,ul=" << ul << "kbps";
+        }
+    }
+    std::cerr << detail.str() << " total=" << total_kbps << "kbps" << std::endl;
+    if (stats_timer_) {
+        stats_timer_->expires_after(std::chrono::seconds(1));
+        stats_timer_->async_wait([this](const asio::error_code& e){ this->do_stats_tick(e); });
+    }
+}
+
+
+// 统计定时器成员函数将在类中实现
+
 
 std::string TaskManager::cmd_seed(const std::string& seed_path, const std::string& file_path) {
     auto seed = read_tseed(seed_path);
@@ -52,6 +89,7 @@ std::string TaskManager::cmd_seed(const std::string& seed_path, const std::strin
     task->is_seed = true;
     task->state = "seeding";
     task->started_at = iso8601_now();
+    task->started_mono = std::chrono::steady_clock::now();
     task->file_path = file_path;
     task->seed_path = seed_path;
     task->seed = std::move(seed);
@@ -90,22 +128,10 @@ std::string TaskManager::cmd_seed(const std::string& seed_path, const std::strin
 
     uint32_t local_speed = detect_link_speed_mbps();
 
-    // Scheduler
+    // 先创建 Scheduler（PeerManager 构造需要它的引用，但 init 在后面）
     task->scheduler = std::make_unique<Scheduler>();
-    task->scheduler->init(chunk_count, local_speed,
-        [](uint32_t, uint32_t, uint32_t, uint32_t){},
-        [](uint32_t){},
-        [](){});
 
-    // 设置 chunk 大小表（CDC 变长 chunk 的 sub-block 计数）
-    {
-        std::vector<uint32_t> sizes(chunk_count);
-        for (uint32_t i = 0; i < chunk_count; i++)
-            sizes[i] = task->seed->chunks[i].length;
-        task->scheduler->set_chunk_sizes(sizes);
-    }
-
-    // 创建 PeerManager
+    // 创建 PeerManager（scheduler 回调依赖它，必须先创建）
     task->peer_mgr = std::make_unique<PeerManager>(
         io_, *task->scheduler, task->io_pool.get(),
         task->seed->info_hash, local_speed, p2p_port_);
@@ -117,7 +143,7 @@ std::string TaskManager::cmd_seed(const std::string& seed_path, const std::strin
     task->peer_mgr->set_chunk_offsets(&task->chunk_offsets);
     task->peer_mgr->start_accept();
 
-    // 用能访问 PeerManager 的真实回调重新初始化 scheduler
+    // 用能访问 PeerManager 的真实回调初始化 scheduler（仅一次）
     auto* pm = task->peer_mgr.get();
     task->scheduler->init(chunk_count, local_speed,
         [pm](uint32_t slot_id, uint32_t chunk_idx, uint32_t begin, uint32_t length) {
@@ -137,6 +163,14 @@ std::string TaskManager::cmd_seed(const std::string& seed_path, const std::strin
             for (auto& s : pm->sessions()) s->send_message(msg);
         });
 
+    // init 后设置 chunk 大小表（CDC 变长 chunk 的 sub-block 计数）
+    {
+        std::vector<uint32_t> sizes(chunk_count);
+        for (uint32_t i = 0; i < chunk_count; i++)
+            sizes[i] = task->seed->chunks[i].length;
+        task->scheduler->set_chunk_sizes(sizes);
+    }
+
     task->scheduler->set_cancel_issuer(
         [pm](uint32_t slot_id, uint32_t chunk_idx, uint32_t begin, uint32_t length) {
             auto* sess = pm->get_session(slot_id);
@@ -144,6 +178,12 @@ std::string TaskManager::cmd_seed(const std::string& seed_path, const std::strin
                 sess->send_message(build_cancel(chunk_idx, begin, length));
                 sess->dec_pending();
             }
+        });
+
+    task->scheduler->set_not_interested_issuer(
+        [pm](uint32_t slot_id) {
+            auto* sess = pm->get_session(slot_id);
+            if (sess) sess->send_not_interested();
         });
 
     tasks_[tid] = std::move(task);
@@ -158,6 +198,7 @@ std::string TaskManager::cmd_add(const std::string& seed_path, const std::string
     task->task_id = tid;
     task->state = "downloading";
     task->started_at = iso8601_now();
+    task->started_mono = std::chrono::steady_clock::now();
     task->seed = std::move(seed);
     task->file_path = save_path;
     task->seed_path = seed_path;
@@ -169,6 +210,10 @@ std::string TaskManager::cmd_add(const std::string& seed_path, const std::string
     task->chunk_offsets.reserve(chunk_count);
     for (uint32_t i = 0; i < chunk_count; i++)
         task->chunk_offsets.push_back(task->seed->chunks[i].offset);
+
+    bool file_exists = false;
+    struct stat st;
+    if (::stat(save_path.c_str(), &st) == 0 && st.st_size > 0) file_exists = true;
 
     // 创建 SegmentWriter（预分配 + mmap 顺序写，HDD 友好）
     task->writer = std::make_unique<SegmentWriter>();
@@ -198,43 +243,45 @@ std::string TaskManager::cmd_add(const std::string& seed_path, const std::string
 
     uint32_t local_speed = detect_link_speed_mbps();
 
+    // 先创建 Scheduler（PeerManager 构造需要它的引用）
     task->scheduler = std::make_unique<Scheduler>();
-    task->scheduler->init(chunk_count, local_speed,
-        [](uint32_t, uint32_t, uint32_t, uint32_t){},
-        [](uint32_t){},
-        [](){});
-
-    // 设置 chunk 大小表
-    {
-        std::vector<uint32_t> sizes(chunk_count);
-        for (uint32_t i = 0; i < chunk_count; i++)
-            sizes[i] = task->seed->chunks[i].length;
-        task->scheduler->set_chunk_sizes(sizes);
-    }
 
     // 创建 PeerManager
     task->peer_mgr = std::make_unique<PeerManager>(
         io_, *task->scheduler, task->io_pool.get(),
         task->seed->info_hash, local_speed, p2p_port_);
 
-    // 断点续传：检查本地文件是否已有数据，直接 SHA-256 比对而非 CDC 重扫
-    bool file_exists = false;
-    struct stat st;
-    if (::stat(save_path.c_str(), &st) == 0 && st.st_size > 0) file_exists = true;
-
     std::vector<bool> init_bf(chunk_count, false);
     uint64_t initial_bytes_done = 0;
     if (file_exists) {
-        for (uint32_t i = 0; i < chunk_count; i++) {
-            uint64_t off = task->seed->chunks[i].offset;
-            uint32_t len = task->seed->chunks[i].length;
-            if (off + len <= static_cast<uint64_t>(st.st_size)) {
-                uint8_t* base = task->writer->get_chunk_base(off, len);
-                if (base && memcmp(sha256(base, len).data(), task->seed->chunks[i].sha256, 32) == 0) {
-                    init_bf[i] = true;
-                    initial_bytes_done += len;
+        try {
+            FastCDCConfig cdc_config{};
+            cdc_config.min_size = task->seed->header.min_chunk_size;
+            cdc_config.avg_size = task->seed->header.avg_chunk_size;
+            cdc_config.max_size = task->seed->header.max_chunk_size;
+            auto local_chunks = fastcdc_scan_file(save_path, cdc_config);
+
+            std::unordered_map<std::string, std::vector<ChunkEntry>> local_index;
+            for (const auto& c : local_chunks) {
+                std::string key(reinterpret_cast<const char*>(c.sha256), 32);
+                local_index[key].push_back(c);
+            }
+
+            for (uint32_t i = 0; i < chunk_count; i++) {
+                const auto& want = task->seed->chunks[i];
+                std::string key(reinterpret_cast<const char*>(want.sha256), 32);
+                auto it = local_index.find(key);
+                if (it == local_index.end()) continue;
+                for (const auto& have : it->second) {
+                    if (have.offset == want.offset && have.length == want.length) {
+                        init_bf[i] = true;
+                        initial_bytes_done += want.length;
+                        break;
+                    }
                 }
             }
+        } catch (const std::exception&) {
+            // Resume is an optimization; failed scans fall back to normal download.
         }
     }
     task->bytes_done = initial_bytes_done;
@@ -243,7 +290,7 @@ std::string TaskManager::cmd_add(const std::string& seed_path, const std::string
     task->peer_mgr->set_chunk_offsets(&task->chunk_offsets);
     task->peer_mgr->start_accept();
 
-    // 接线 scheduler 回调
+    // 用能访问 PeerManager 的真实回调初始化 scheduler（仅一次）
     auto* pm = task->peer_mgr.get();
     task->scheduler->init(chunk_count, local_speed,
         [pm](uint32_t slot_id, uint32_t chunk_idx, uint32_t begin, uint32_t length) {
@@ -263,6 +310,14 @@ std::string TaskManager::cmd_add(const std::string& seed_path, const std::string
             for (auto& s : pm->sessions()) s->send_message(msg);
         });
 
+    // init 后设置 chunk 大小表
+    {
+        std::vector<uint32_t> sizes(chunk_count);
+        for (uint32_t i = 0; i < chunk_count; i++)
+            sizes[i] = task->seed->chunks[i].length;
+        task->scheduler->set_chunk_sizes(sizes);
+    }
+
     // 断点续传：将已校验通过的 chunk 标记为 COMPLETE
     if (initial_bytes_done > 0)
         task->scheduler->mark_all_complete(init_bf);
@@ -274,6 +329,12 @@ std::string TaskManager::cmd_add(const std::string& seed_path, const std::string
                 sess->send_message(build_cancel(chunk_idx, begin, length));
                 sess->dec_pending();
             }
+        });
+
+    task->scheduler->set_not_interested_issuer(
+        [pm](uint32_t slot_id) {
+            auto* sess = pm->get_session(slot_id);
+            if (sess) sess->send_not_interested();
         });
 
     tasks_[tid] = std::move(task);
@@ -293,6 +354,7 @@ std::string TaskManager::cmd_update(const std::string& new_seed_path, const std:
     task->task_id = tid;
     task->state = "downloading";
     task->started_at = iso8601_now();
+    task->started_mono = std::chrono::steady_clock::now();
     task->seed = std::move(new_seed_ptr);
     task->file_path = new_file_path;
     task->seed_path = new_seed_path;
@@ -306,7 +368,7 @@ std::string TaskManager::cmd_update(const std::string& new_seed_path, const std:
         task->chunk_offsets.push_back(task->seed->chunks[i].offset);
 
     // 尝试增量：扫描旧文件，构建 {sha256 -> {offset, length}} 索引
-    std::unordered_map<std::string, std::pair<uint64_t, uint32_t>> old_chunk_index;
+    std::unordered_map<std::string, std::vector<std::pair<uint64_t, uint32_t>>> old_chunk_index;
     bool incremental_ok = false;
     if (!old_file_path.empty()) {
         try {
@@ -321,7 +383,7 @@ std::string TaskManager::cmd_update(const std::string& new_seed_path, const std:
             auto old_chunks = fastcdc_scan_file(old_file_path, cdc_config);
             for (const auto& c : old_chunks) {
                 std::string key(reinterpret_cast<const char*>(c.sha256), 32);
-                old_chunk_index[key] = {c.offset, c.length};
+                old_chunk_index[key].push_back({c.offset, c.length});
             }
             incremental_ok = true;
         } catch (const std::exception&) {
@@ -356,53 +418,50 @@ std::string TaskManager::cmd_update(const std::string& new_seed_path, const std:
 
     uint32_t local_speed = detect_link_speed_mbps();
 
+    // 先创建 Scheduler（PeerManager 构造需要它的引用）
     task->scheduler = std::make_unique<Scheduler>();
-    task->scheduler->init(chunk_count, local_speed,
-        [](uint32_t, uint32_t, uint32_t, uint32_t){},
-        [](uint32_t){},
-        [](){});
-
-    {
-        std::vector<uint32_t> sizes(chunk_count);
-        for (uint32_t i = 0; i < chunk_count; i++)
-            sizes[i] = task->seed->chunks[i].length;
-        task->scheduler->set_chunk_sizes(sizes);
-    }
 
     // 构建初始 bitfield：增量匹配的 chunk 零拷贝移动 + 标记 HAVE
     std::vector<bool> init_bf(chunk_count, false);
     uint32_t matched = 0;
+    uint64_t matched_bytes = 0;
     if (incremental_ok) {
         int new_fd = task->writer->get_file_fd();
         int old_fd = ::open(old_file_path.c_str(), O_RDWR);
         for (uint32_t i = 0; i < chunk_count; i++) {
             std::string key(reinterpret_cast<const char*>(task->seed->chunks[i].sha256), 32);
             auto it = old_chunk_index.find(key);
-            if (it != old_chunk_index.end()) {
-                init_bf[i] = true;
-                matched++;
-                // 零拷贝数据移动：clone_range/reflink 将旧文件数据移动到新偏移
-                if (old_fd >= 0) {
-                    clone_range(old_fd, it->second.first,
-                                new_fd, task->seed->chunks[i].offset,
-                                it->second.second);
+            if (it != old_chunk_index.end() && old_fd >= 0) {
+                auto& candidates = it->second;
+                for (auto cand = candidates.begin(); cand != candidates.end(); ++cand) {
+                    if (cand->second != task->seed->chunks[i].length) continue;
+                    if (!clone_range(old_fd, cand->first,
+                                     new_fd, task->seed->chunks[i].offset,
+                                     task->seed->chunks[i].length)) {
+                        continue;
+                    }
+                    init_bf[i] = true;
+                    matched++;
+                    matched_bytes += task->seed->chunks[i].length;
+                    candidates.erase(cand);
+                    break;
                 }
-                old_chunk_index.erase(it);
+                if (candidates.empty()) old_chunk_index.erase(it);
             }
         }
         // 未被复用的旧文件块，使用 fallocate punch_hole 释放空洞归还磁盘空间
         if (old_fd >= 0 && !old_chunk_index.empty()) {
             MappedFile old_mf;
             if (old_mf.open_and_map(old_file_path, true)) {
-                for (const auto& [k, old_c] : old_chunk_index)
-                    old_mf.punch_hole(old_c.first, old_c.second);
+                for (const auto& [k, old_chunks] : old_chunk_index) {
+                    for (const auto& old_c : old_chunks)
+                        old_mf.punch_hole(old_c.first, old_c.second);
+                }
             }
         }
         if (old_fd >= 0) ::close(old_fd);
-        if (matched > 0) {
-            task->bytes_done = 0; // bytes_done 由实际传输累加，匹配的不计入
-        }
     }
+    task->bytes_done = matched_bytes;
 
     // 创建 PeerManager
     task->peer_mgr = std::make_unique<PeerManager>(
@@ -414,7 +473,7 @@ std::string TaskManager::cmd_update(const std::string& new_seed_path, const std:
     task->peer_mgr->set_chunk_offsets(&task->chunk_offsets);
     task->peer_mgr->start_accept();
 
-    // 接线 scheduler 回调
+    // 用能访问 PeerManager 的真实回调初始化 scheduler（仅一次）
     auto* pm = task->peer_mgr.get();
     task->scheduler->init(chunk_count, local_speed,
         [pm](uint32_t slot_id, uint32_t chunk_idx, uint32_t begin, uint32_t length) {
@@ -434,6 +493,18 @@ std::string TaskManager::cmd_update(const std::string& new_seed_path, const std:
             for (auto& s : pm->sessions()) s->send_message(msg);
         });
 
+    // init 后设置 chunk 大小表
+    {
+        std::vector<uint32_t> sizes(chunk_count);
+        for (uint32_t i = 0; i < chunk_count; i++)
+            sizes[i] = task->seed->chunks[i].length;
+        task->scheduler->set_chunk_sizes(sizes);
+    }
+
+    // 增量匹配的 chunk 标记为已完成，避免 P2P 重复下载
+    if (matched > 0)
+        task->scheduler->mark_all_complete(init_bf);
+
     task->scheduler->set_cancel_issuer(
         [pm](uint32_t slot_id, uint32_t chunk_idx, uint32_t begin, uint32_t length) {
             auto* sess = pm->get_session(slot_id);
@@ -441,6 +512,12 @@ std::string TaskManager::cmd_update(const std::string& new_seed_path, const std:
                 sess->send_message(build_cancel(chunk_idx, begin, length));
                 sess->dec_pending();
             }
+        });
+
+    task->scheduler->set_not_interested_issuer(
+        [pm](uint32_t slot_id) {
+            auto* sess = pm->get_session(slot_id);
+            if (sess) sess->send_not_interested();
         });
 
     tasks_[tid] = std::move(task);
@@ -463,8 +540,9 @@ std::vector<TaskInfo> TaskManager::cmd_list() {
         info.bytes_done = t->bytes_done;
         info.started_at  = t->started_at;
         info.finished_at = t->finished_at;
-        // speed_mib_s: EMA 值（bytes/tick），转换为 MiB/s（100ms tick → *10）
-        info.speed_mib_s = t->speed_ema / (1024.0 * 1024.0) * 10.0;
+        info.speed_mib_s = (info.state == "complete" && t->completed_speed_mib_s > 0.0)
+            ? t->completed_speed_mib_s
+            : t->speed_ema / (1024.0 * 1024.0) * 10.0;
         if (t->seed)
             info.progress = t->seed->header.file_size > 0
                 ? static_cast<double>(t->bytes_done) / t->seed->header.file_size : 0.0;
@@ -518,8 +596,22 @@ void TaskManager::tick() {
                 if (r.passed) {
                     passed.push_back({r.chunk_idx, r.winning_peer_slot});
                     // 累加 bytes_done（CDC 变长 chunk）
-                    if (t->seed && r.chunk_idx < t->seed->header.chunk_count)
-                        t->bytes_done += t->seed->chunks[r.chunk_idx].length;
+                    if (t->seed && r.chunk_idx < t->seed->header.chunk_count) {
+                        uint32_t csize = t->seed->chunks[r.chunk_idx].length;
+                        t->bytes_done += csize;
+                        // 追踪 chunk 完成：记录哪个 chunk 从哪个 peer 完成
+                        const char* src_ip = "?";
+                        if (t->peer_mgr) {
+                            auto* sess = t->peer_mgr->get_session(r.winning_peer_slot);
+                            if (sess) src_ip = sess->remote_ip().c_str();
+                        }
+                        std::cerr << "[chunk_done] idx=" << r.chunk_idx
+                                  << " size=" << csize
+                                  << " from=" << src_ip
+                                  << " progress=" << t->bytes_done << "/" << t->seed->header.file_size
+                                  << " (" << (t->bytes_done * 100.0 / t->seed->header.file_size) << "%)"
+                                  << std::endl;
+                    }
                 } else {
                     // SHA-256 校验失败 → 回退为 MISSING，下一轮 tick 自动重新下载
                     t->scheduler->on_verify_failed(r.chunk_idx);
@@ -532,6 +624,12 @@ void TaskManager::tick() {
             if (t->seed && t->bytes_done >= t->seed->header.file_size && t->state == "downloading") {
                 t->state = "complete";
                 t->finished_at = iso8601_now();
+                auto elapsed = std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - t->started_mono).count();
+                if (elapsed > 0.0) {
+                    t->completed_speed_mib_s =
+                        static_cast<double>(t->seed->header.file_size) / elapsed / (1024.0 * 1024.0);
+                }
             }
         }
 
@@ -586,7 +684,7 @@ void TaskManager::tick_tracker_announce(asio::io_context& io) {
                 for (auto& p : peers) {
                     struct in_addr ia; ia.s_addr = p.ip;
                     std::string ip = inet_ntoa(ia);
-                    t.peer_mgr->connect_to(ip, p.port, p.flags);
+                    t.peer_mgr->connect_to(ip, ntoh16(p.port), p.flags);
                 }
             });
     }

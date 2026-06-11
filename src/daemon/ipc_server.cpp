@@ -38,6 +38,7 @@ void IpcServer::handle_client(std::shared_ptr<asio::ip::tcp::socket> socket) {
 }
 
 void IpcServer::handle(const std::string& request, std::string& response) {
+    try {
     // Minimal JSON parsing — extract cmd and route
     std::string cmd;
     auto pos = request.find("\"cmd\":\"");
@@ -122,11 +123,11 @@ void IpcServer::handle(const std::string& request, std::string& response) {
         std::string task_id   = extract("task_id");
 
         if (!new_seed.empty()) {
-            // 4-arg form: incremental update
+            // 4-arg form: incremental update -> route to TaskManager::cmd_update
             std::string new_file = extract("new_file");
             std::string old_seed = extract("old_seed");
             std::string old_file = extract("old_file");
-            response = R"({"status":"error","error":"incremental update not yet implemented"})";
+            response = task_mgr_.cmd_update(new_seed, new_file, old_seed, old_file);
         } else if (!task_id.empty()) {
             // 1-arg form: task status query
             auto tasks = task_mgr_.cmd_list();
@@ -170,6 +171,10 @@ void IpcServer::handle(const std::string& request, std::string& response) {
         }
     } else {
         response = R"({"status":"error","error":"unknown command"})";
+    }
+    } catch (const std::exception& e) {
+        std::cerr << "[IPC] exception: " << e.what() << std::endl;
+        response = R"({"status":"error","error":")" + std::string(e.what()) + R"("})";
     }
 }
 

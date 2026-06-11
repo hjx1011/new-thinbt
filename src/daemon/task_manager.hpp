@@ -10,9 +10,11 @@
 #include "segment_io.hpp"
 #include "tracker_server.hpp"
 #include <memory>
+#include <asio.hpp>
 #include <string>
 #include <map>
 #include <vector>
+#include <chrono>
 
 namespace asio { class io_context; }
 
@@ -50,6 +52,8 @@ public:
     TrackerServer& tracker() { return tracker_; }
     void tick();
 
+    void do_stats_tick(const asio::error_code& ec);
+
     // Periodic ticks called from heartbeat
     void tick_tracker_announce(asio::io_context& io);
     void tick_choke_all();
@@ -67,6 +71,7 @@ private:
         std::string state;                       // seeding / downloading / waiting / complete / error
         std::string started_at;                  // ISO 8601 启动时间
         std::string finished_at;                 // ISO 8601 完成时间
+        std::chrono::steady_clock::time_point started_mono = std::chrono::steady_clock::now();
 
         std::unique_ptr<ChunkAssembler[]> assemblers;
         std::unique_ptr<IOWorkerPool> io_pool;
@@ -82,11 +87,13 @@ private:
 
         uint64_t bytes_done = 0;
         double speed_ema = 0.0;
+        double completed_speed_mib_s = 0.0;
         uint64_t last_bytes_done = 0;            // 上一 tick 的 bytes_done，用于计算速度
         std::atomic<bool> tracker_dead{false};   // Tracker 重试耗尽标记
     };
 
     asio::io_context& io_;
+    std::unique_ptr<asio::steady_timer> stats_timer_;
     uint16_t p2p_port_;
     std::string tracker_host_;
     uint16_t tracker_port_;

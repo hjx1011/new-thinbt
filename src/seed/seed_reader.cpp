@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <cstring>
 #include <memory>
+#include <iostream>
 
 namespace thinbt {
 
@@ -23,22 +24,25 @@ std::unique_ptr<TSeedFile> read_tseed(const std::string& path) {
     // Read header (92 bytes, Big-Endian on disk)
     read_exact(f, &seed->header, sizeof(TSeedHeader));
 
-    // Validate magic: header is in network byte order
-    if (seed->header.magic != TSeedHeader::MAGIC) {
-        // Try byte-swapped (maybe already in host order from a buggy writer)
+    // 检测字节序：raw magic 匹配 → 主机字节序（旧版 writer），无需交换
+    // raw magic 不匹配 → 网络字节序（新版 writer），调 to_host_endian() 转换
+    bool needs_swap = (seed->header.magic != TSeedHeader::MAGIC);
+    if (needs_swap) {
         seed->header.to_host_endian();
         if (seed->header.magic != TSeedHeader::MAGIC) {
             throw std::runtime_error("Invalid .tseed magic number: 0x"
                 + sha256_hex(sha256(reinterpret_cast<const uint8_t*>(&seed->header), 4)).substr(0, 8));
         }
-    } else {
-        seed->header.to_host_endian();
     }
 
-    // 当前仅支持 v1 格式
-    if (seed->header.version != 1) {
+    // 支持 v1/v3/v4 向后兼容（若布局相同则可以直接读取）
+    if (seed->header.version < 1 || seed->header.version > 4) {
         throw std::runtime_error("Unsupported .tseed version: "
             + std::to_string(seed->header.version));
+    }
+    if (seed->header.version != 1) {
+        // 兼容模式：仅打印警告，继续解析（假设布局兼容）
+        std::cerr << "[warn] .tseed version " << seed->header.version << " detected, using compatibility mode" << std::endl;
     }
 
     // Read file_name
@@ -49,11 +53,13 @@ std::unique_ptr<TSeedFile> read_tseed(const std::string& path) {
     seed->announce_url.resize(seed->header.announce_len);
     read_exact(f, seed->announce_url.data(), seed->header.announce_len);
 
-    // Read chunks (each 44 bytes, Big-Endian on disk)
+    // Read chunks (each 44 bytes)
     seed->chunks.resize(seed->header.chunk_count);
     for (uint32_t i = 0; i < seed->header.chunk_count; i++) {
         read_exact(f, &seed->chunks[i], sizeof(ChunkEntry));
-        seed->chunks[i].to_host_endian();
+        if (needs_swap) {
+            seed->chunks[i].to_host_endian();
+        }
     }
 
     // Compute InfoHash: SHA-1(file_sha256 || ChunkEntry[])

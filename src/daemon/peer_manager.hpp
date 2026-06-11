@@ -22,6 +22,7 @@ public:
 
     PeerManager(asio::io_context& io, Scheduler& sched, IOWorkerPool* io_pool,
                 const Sha1Digest& info_hash, uint32_t local_speed_mbps, uint16_t p2p_port);
+    ~PeerManager();
 
     void start_accept();
     void connect_to(const std::string& ip, uint16_t port, uint8_t flags);
@@ -48,6 +49,7 @@ private:
     Sha1Digest info_hash_;
     uint32_t local_speed_mbps_;
     asio::ip::tcp::acceptor acceptor_;
+    uint16_t p2p_port_;
     int file_fd_ = -1;
     std::vector<bool> initial_bitfield_;
     const std::vector<uint64_t>* chunk_offsets_ = nullptr;
@@ -55,7 +57,7 @@ private:
     std::vector<std::shared_ptr<PeerSession>> sessions_;
 
     std::map<std::string, std::pair<std::chrono::steady_clock::time_point, uint8_t>> recent_connects_;
-    std::map<std::string, std::chrono::steady_clock::time_point> recent_disconnects_;
+    std::map<std::string, std::pair<std::chrono::steady_clock::time_point, uint8_t>> recent_disconnects_;
 };
 
 } // namespace thinbt

@@ -65,6 +65,7 @@ public:
     void set_on_pex_peer(OnPexPeer cb) { on_pex_peer_ = std::move(cb); }
     void set_on_pex_remove(OnPexRemove cb) { on_pex_remove_ = std::move(cb); }
     void set_on_handshake_done(OnHandshakeDone cb) { on_handshake_done_ = std::move(cb); }
+    void set_on_disconnect(OnDisconnect cb) { on_disconnect_ = std::move(cb); }
 
     bool is_peer_interested() const { return peer_interested_.load(std::memory_order_acquire); }
     bool am_interested() const { return am_interested_.load(std::memory_order_acquire); }
@@ -128,7 +129,7 @@ private:
     bool is_writing_ = false;
 
     uint32_t pending_requests_ = 0;
-    uint32_t pipeline_cap_ = 16;
+    uint32_t pipeline_cap_ = 128;
     uint32_t slot_id_ = 0;
 
     Scheduler* scheduler_ = nullptr;
@@ -158,6 +159,10 @@ private:
     uint32_t download_rate_kbps_ = 0;
     uint32_t upload_rate_kbps_ = 0;
     std::chrono::steady_clock::time_point last_choke_eval_time_;
+
+    // 可选：启用 sendfile 零拷贝上传（通过环境变量 THINBT_ENABLE_SENDFILE=1 控制）
+    bool use_sendfile_ = false;
+    std::atomic<bool> closed_{false};  // disconnect() 后为 true，防止后台线程访问已关闭的 socket
 
     void do_eval_tick(const asio::error_code& ec);
 

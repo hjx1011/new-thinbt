@@ -26,7 +26,11 @@ public:
     void*       data()       { return data_; }
     const void* data() const { return data_; }
     uint64_t    size() const { return size_; }
+#ifdef _WIN32
+    int         fd()   const { return -1; }
+#else
     int         fd()   const { return fd_; }
+#endif
 
     bool preallocate(uint64_t size);
     bool advise_sequential(uint64_t offset, uint64_t len);
@@ -48,7 +52,7 @@ private:
 bool clone_range(int src_fd, uint64_t src_off,
                  int dst_fd, uint64_t dst_off, uint64_t len);
 
-ssize_t sendfile_zero_copy(int socket_fd, int file_fd,
+ssize_t sendfile_zero_copy(socket_handle_t socket_fd, int file_fd,
                             uint64_t& offset, size_t count);
 
 } // namespace thinbt

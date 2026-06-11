@@ -7,6 +7,7 @@
 #ifdef _WIN32
 #include <io.h>
 #include <windows.h>
+#include <fcntl.h>
 #else
 #include <fcntl.h>
 #include <unistd.h>
@@ -200,6 +201,16 @@ bool SegmentWriter::map_segment(uint32_t seg_idx) {
     if (!seg.data) {
         std::cerr << "[SegmentWriter] MapViewOfFile failed" << std::endl;
         return false;
+    }
+    struct MemoryRangeEntry {
+        PVOID VirtualAddress;
+        SIZE_T NumberOfBytes;
+    } range{seg.data, static_cast<SIZE_T>(map_size)};
+    using PrefetchVirtualMemoryFn = BOOL (WINAPI *)(HANDLE, ULONG_PTR, MemoryRangeEntry*, ULONG);
+    auto prefetch = reinterpret_cast<PrefetchVirtualMemoryFn>(
+        GetProcAddress(GetModuleHandleA("kernel32.dll"), "PrefetchVirtualMemory"));
+    if (prefetch) {
+        prefetch(GetCurrentProcess(), 1, &range, 0);
     }
 #else
     seg.data = static_cast<uint8_t*>(::mmap(

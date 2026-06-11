@@ -6,13 +6,52 @@
 #include <iostream>
 
 namespace thinbt {
+namespace {
+
+std::vector<PexPeer> make_full_pex_list(
+    const std::vector<std::shared_ptr<PeerSession>>& sessions,
+    const PeerSession* exclude,
+    uint16_t p2p_port)
+{
+    std::vector<PexPeer> peers;
+    for (const auto& sess : sessions) {
+        if (!sess || sess.get() == exclude) continue;
+        std::string ip = sess->remote_ip();
+        if (ip.empty() || ip == "unknown") continue;
+
+        PexPeer p{};
+        p.ip = inet_addr(ip.c_str());
+        p.port = htons(p2p_port);
+        p.flags = sess->link_speed_reported() >= 1000 ? 0x02 : 0x00;
+        peers.push_back(p);
+    }
+    return peers;
+}
+
+} // namespace
 
 PeerManager::PeerManager(asio::io_context& io, Scheduler& sched, IOWorkerPool* io_pool,
                           const Sha1Digest& info_hash, uint32_t local_speed_mbps, uint16_t p2p_port)
     : io_(io), sched_(sched), io_pool_(io_pool), local_speed_mbps_(local_speed_mbps),
-      acceptor_(io, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), p2p_port))
+      acceptor_(io, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), p2p_port)), p2p_port_(p2p_port)
 {
     memcpy(info_hash_.data(), info_hash.data(), 20);
+}
+
+PeerManager::~PeerManager() {
+    // 先清除所有 session 的回调，防止 disconnect 时回调已销毁的 PeerManager
+    for (auto& s : sessions_) {
+        s->set_on_handshake_done(nullptr);
+        s->set_on_pex_peer(nullptr);
+        s->set_on_pex_remove(nullptr);
+        s->set_on_request_timeout(nullptr);
+        s->set_on_disconnect(nullptr);
+    }
+    // 再断开所有 session
+    for (auto& s : sessions_) {
+        s->disconnect();
+    }
+    sessions_.clear();
 }
 
 void PeerManager::start_accept() {
@@ -24,6 +63,15 @@ void PeerManager::do_accept() {
     acceptor_.async_accept(
         [&mgr](asio::error_code ec, asio::ip::tcp::socket sock) {
             if (!ec) {
+                std::string remote_ip = "?";
+                uint16_t remote_port = 0;
+                {
+                    asio::error_code ign;
+                    auto ep = sock.remote_endpoint(ign);
+                    if (!ign) { remote_ip = ep.address().to_string(); remote_port = ep.port(); }
+                }
+                std::cerr << "[do_accept] new inbound from " << remote_ip << ":" << remote_port
+                          << " existing=" << mgr.sessions_.size() << std::endl;
                 if (mgr.sessions_.size() >= MAX_PEERS) {
                     mgr.do_accept();
                     return;
@@ -35,8 +83,14 @@ void PeerManager::do_accept() {
                 sess->set_chunk_offsets(mgr.chunk_offsets_);
                 sess->set_on_handshake_done([&mgr](std::shared_ptr<PeerSession> s) {
                     if (!mgr.initial_bitfield_.empty()) {
-                        s->send_message(build_bitfield(mgr.initial_bitfield_));
+                        std::cerr << "[peer] sending bitfield, size=" << mgr.initial_bitfield_.size() << std::endl;
+                        auto bf = build_bitfield(mgr.initial_bitfield_);
+                        std::cerr << "[peer] bitfield built, bytes=" << bf.size() << std::endl;
+                        s->send_message(std::move(bf));
+                        std::cerr << "[peer] bitfield sent" << std::endl;
                     }
+                    auto peers = make_full_pex_list(mgr.sessions_, s.get(), mgr.p2p_port_);
+                    if (!peers.empty()) s->send_message(build_pex(false, peers));
                 });
                 sess->start_inbound(std::move(sock),
                     [&mgr](std::shared_ptr<PeerSession> s) { mgr.on_peer_disconnected(std::move(s)); });
@@ -49,11 +103,31 @@ void PeerManager::do_accept() {
 void PeerManager::connect_to(const std::string& ip, uint16_t port, uint8_t flags) {
     if (sessions_.size() >= MAX_PEERS) return;
 
-    // 检查是否已连接此 IP:Port，避免重复连接
-    for (auto& s : sessions_) {
-        if (s->remote_ip() == ip && s->remote_port() == port) return;
+    std::cerr << "[connect_to] trying " << ip << ":" << port << " flags=" << (int)flags
+              << " existing_sessions=" << sessions_.size() << std::endl;
+
+    // 防止连接自己（Tracker 返回的 peer 列表中包含本机）
+    {
+        asio::error_code ec;
+        auto local_ep = acceptor_.local_endpoint(ec);
+        if (!ec && ip == local_ep.address().to_string() && port == p2p_port_) {
+            std::cerr << "[connect_to] SKIP self-connect to " << ip << std::endl;
+            return;
+        }
     }
 
+    // 去重：同一 IP 只保留一个 TCP 连接（全双工无需双向各一条）
+    for (auto& s : sessions_) {
+        std::string existing_ip = s->remote_ip();
+        std::cerr << "[connect_to]   check existing: ip=" << existing_ip
+                  << " slot=" << s->slot_id() << std::endl;
+        if (existing_ip == ip) {
+            std::cerr << "[connect_to] SKIP duplicate for " << ip << std::endl;
+            return;
+        }
+    }
+
+    std::cerr << "[connect_to] creating new session to " << ip << std::endl;
     auto sess = std::make_shared<PeerSession>(io_, info_hash_, local_speed_mbps_);
     sess->set_scheduler(&sched_);
     sess->set_io_pool(io_pool_);
@@ -61,8 +135,14 @@ void PeerManager::connect_to(const std::string& ip, uint16_t port, uint8_t flags
     sess->set_chunk_offsets(chunk_offsets_);
     sess->set_on_handshake_done([this](std::shared_ptr<PeerSession> s) {
         if (!initial_bitfield_.empty()) {
-            s->send_message(build_bitfield(initial_bitfield_));
+            std::cerr << "[peer] sending bitfield(out), size=" << initial_bitfield_.size() << std::endl;
+            auto bf = build_bitfield(initial_bitfield_);
+            std::cerr << "[peer] bitfield built(out), bytes=" << bf.size() << std::endl;
+            s->send_message(std::move(bf));
+            std::cerr << "[peer] bitfield sent(out)" << std::endl;
         }
+        auto peers = make_full_pex_list(sessions_, s.get(), p2p_port_);
+        if (!peers.empty()) s->send_message(build_pex(false, peers));
     });
     sess->start_outbound(ip, port,
         [this](std::shared_ptr<PeerSession> s) { on_peer_disconnected(std::move(s)); });
@@ -97,7 +177,9 @@ void PeerManager::on_peer_connected(std::shared_ptr<PeerSession> sess) {
 
 void PeerManager::on_peer_disconnected(std::shared_ptr<PeerSession> sess) {
     sched_.on_peer_removed(sess->slot_id());
-    recent_disconnects_[sess->remote_ip()] = std::chrono::steady_clock::now();
+    // Preserve flags for PEX delta: derive from session reported speed
+    uint8_t derived_flags = (sess->link_speed_reported() >= 1000) ? 0x02 : 0x00;
+    recent_disconnects_[sess->remote_ip()] = {std::chrono::steady_clock::now(), derived_flags};
     sessions_.erase(std::remove(sessions_.begin(), sessions_.end(), sess), sessions_.end());
 }
 
@@ -184,14 +266,17 @@ void PeerManager::tick_pex() {
         }
     }
 
-    for (auto& [ip, t] : recent_disconnects_)
+    for (auto& [ip, tf] : recent_disconnects_) {
+        auto& t = tf.first;
+        auto flags = tf.second;
         if (t > cutoff) {
             PexPeer p{};
             p.ip   = inet_addr(ip.c_str());
             p.port = htons(16889);
-            p.flags |= 0x80; // preserve original flags, set "left" bit
+            p.flags = flags | 0x80; // preserve original flags, set "left" bit
             delta.push_back(p);
         }
+    }
 
     if (!delta.empty()) {
         auto pex_msg = build_pex(true, delta);

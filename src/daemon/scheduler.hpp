@@ -20,7 +20,7 @@ struct PeerSlot {
     uint32_t rtt_us = 0;
     uint32_t link_speed_mbps = 0;
     uint32_t link_speed_reported = 0;
-    uint32_t pipeline_cap = 16;
+    uint32_t pipeline_cap = 128;
     bool     am_choking = true;
     std::vector<bool> remote_bitfield;
 
@@ -38,11 +38,13 @@ public:
     using HaveBroadcaster = std::function<void(uint32_t chunk_idx)>;
     using CancelIssuer = std::function<void(uint32_t peer_slot, uint32_t chunk_idx, uint32_t begin, uint32_t length)>;
     using NotInterestedBroadcaster = std::function<void()>;
+    using NotInterestedIssuer = std::function<void(uint32_t peer_slot)>;
 
     void init(uint32_t total_chunks, uint32_t local_speed_mbps,
               RequestIssuer issue_req, HaveBroadcaster broadcast_have,
               NotInterestedBroadcaster broadcast_not_interested);
     void set_cancel_issuer(CancelIssuer cancel);
+    void set_not_interested_issuer(NotInterestedIssuer issuer);
     void set_chunk_sizes(const std::vector<uint32_t>& sizes);
 
     // Event-driven availability (O(1) per event)
@@ -67,6 +69,7 @@ private:
     std::optional<uint32_t> select_best_peer(uint32_t chunk_idx);
     void send_cancel_for_chunk(uint32_t chunk_idx, uint32_t exclude_slot);
     void tick_endgame(uint64_t now_ms);
+    void check_peer_interest(uint32_t slot_id);  // 检查 peer 是否有我们需要的 chunk
 
     std::vector<ChunkState> chunk_states_;
     std::vector<uint32_t>  chunk_sub_blocks_;   // 每个 chunk 的 sub-block 数量
@@ -82,6 +85,8 @@ private:
     std::vector<std::vector<uint64_t>> chunk_sub_req_time_;
     // chunk_sub_done_count_[chunk] = 该 chunk 已完成的 sub-block 数量
     std::vector<uint32_t> chunk_sub_done_count_;
+    // chunk_sub_req_count_[chunk] = 该 chunk 已发出请求的 sub-block 数量（用于 O(1) 检测）
+    std::vector<uint32_t> chunk_sub_req_count_;
 
     std::vector<PeerSlot>  peer_slots_;
     SchedulerPhase phase_ = SchedulerPhase::NORMAL;
@@ -91,6 +96,7 @@ private:
     CancelIssuer  cancel_request_;
     HaveBroadcaster broadcast_have_;
     NotInterestedBroadcaster broadcast_not_interested_;
+    NotInterestedIssuer not_interested_issuer_;
 
     static constexpr uint32_t ENDGAME_THRESHOLD    = 128;
     static constexpr uint32_t MAX_ENDGAME_CHUNKS   = 32;

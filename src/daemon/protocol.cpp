@@ -105,10 +105,7 @@ std::vector<uint8_t> build_pex(bool is_delta, const std::vector<PexPeer>& peers)
     uint16_t count_be = hton16(static_cast<uint16_t>(peers.size()));
     memcpy(payload.data() + 1, &count_be, 2);
     for (size_t i = 0; i < peers.size(); i++) {
-        PexPeer p = peers[i];
-        p.ip   = hton32(p.ip);
-        p.port = hton16(p.port);
-        memcpy(payload.data() + 3 + i * 8, &p, 8);
+        memcpy(payload.data() + 3 + i * 8, &peers[i], 8);
     }
     return build_message(P2PMsgId::PEX, payload.data(), plen);
 }

@@ -1,5 +1,6 @@
 #include "io_worker.hpp"
 #include <cassert>
+#include <iostream>
 
 namespace thinbt {
 
@@ -53,8 +54,30 @@ void IOWorkerPool::worker_loop(uint32_t worker_id) {
         bool any = false;
         while (q.queue.try_dequeue(task)) {
             any = true;
-            bool complete = assemblers_[task.chunk_idx].on_piece(
-                task.begin, task.data, task.length);
+            // Diagnostics: validate task and owner before writing into mmap
+            if (!task.owner) {
+                std::cerr << "[IOWorker] WARNING: task.owner is null for chunk " << task.chunk_idx << std::endl;
+            } else {
+                // optional: report use_count in abnormal cases
+                if (task.owner.use_count() == 0) {
+                    std::cerr << "[IOWorker] WARNING: owner use_count==0 for chunk " << task.chunk_idx << std::endl;
+                }
+            }
+
+            // Bounds check: prevent on_piece from attempting out-of-range writes
+            if (task.chunk_idx == UINT32_MAX) {
+                std::cerr << "[IOWorker] ERROR: invalid chunk_idx UINT32_MAX" << std::endl;
+            }
+
+            bool complete = false;
+            try {
+                complete = assemblers_[task.chunk_idx].on_piece(
+                    task.begin, task.data, task.length);
+            } catch (const std::exception& e) {
+                std::cerr << "[IOWorker] exception in on_piece: " << e.what() << std::endl;
+            } catch (...) {
+                std::cerr << "[IOWorker] unknown exception in on_piece" << std::endl;
+            }
             if (complete && on_complete_) {
                 ChunkCompleteMsg msg{task.chunk_idx, task.peer_slot};
                 on_complete_(msg);

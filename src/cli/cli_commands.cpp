@@ -42,8 +42,41 @@ std::string send_ipc(const std::string& json, uint16_t port) {
 
     return std::string(buf, n > 0 ? n : 0);
 #else
-    (void)json; (void)port;
-    return R"({"status":"error","error":"CLI not yet implemented on Windows"})";
+    WSADATA wsa{};
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
+        return R"({"status":"error","error":"WSAStartup failed"})";
+
+    SOCKET fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (fd == INVALID_SOCKET) {
+        WSACleanup();
+        return R"({"status":"error","error":"socket failed"})";
+    }
+
+    struct sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port   = htons(port);
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    if (connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+        closesocket(fd);
+        WSACleanup();
+        return R"({"status":"error","error":"connect failed"})";
+    }
+
+    std::string req = json + "\n";
+    int sent = send(fd, req.c_str(), static_cast<int>(req.size()), 0);
+    if (sent == SOCKET_ERROR) {
+        closesocket(fd);
+        WSACleanup();
+        return R"({"status":"error","error":"send failed"})";
+    }
+
+    char buf[65536] = {};
+    int n = recv(fd, buf, static_cast<int>(sizeof(buf) - 1), 0);
+    closesocket(fd);
+    WSACleanup();
+
+    return std::string(buf, n > 0 ? static_cast<size_t>(n) : 0);
 #endif
 }
 

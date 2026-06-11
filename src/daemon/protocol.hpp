@@ -39,6 +39,7 @@ struct Handshake {
     void build(const Sha1Digest& ih, uint32_t speed);
     bool validate_protocol_id() const;
 };
+static_assert(sizeof(Handshake) == 67, "Handshake must be 67 bytes");
 
 struct PexPeer {
     uint32_t ip;
@@ -46,6 +47,7 @@ struct PexPeer {
     uint8_t  flags;
     uint8_t  reserved;
 };
+static_assert(sizeof(PexPeer) == 8, "PexPeer must be 8 bytes");
 
 #pragma pack(pop)
 

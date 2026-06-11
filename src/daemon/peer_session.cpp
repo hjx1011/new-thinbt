@@ -1,12 +1,21 @@
 #include "peer_session.hpp"
 #include "scheduler.hpp"
 #include "io_worker.hpp"
+#include "sendfile_pool.hpp"
+#include "file_read_pool.hpp"
 #include "common/net_util.hpp"
 #include "common/file_util.hpp"
 #include <cstring>
 #include <cstdlib>
 #include <iostream>
 #include <cmath>
+#include <thread>
+#ifndef _WIN32
+#include <sys/socket.h>
+#endif
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
 
 namespace thinbt {
 
@@ -18,6 +27,12 @@ PeerSession::PeerSession(asio::io_context& io, const Sha1Digest& info_hash, uint
     , last_choke_eval_time_(std::chrono::steady_clock::now())
 {
     memcpy(info_hash_.data(), info_hash.data(), 20);
+    // 默认启用 sendfile，除非通过 THINBT_ENABLE_SENDFILE=0 显式关闭
+    use_sendfile_ = true;
+    const char* env = std::getenv("THINBT_ENABLE_SENDFILE");
+    if (env && std::string(env) == "0") use_sendfile_ = false;
+    // 启动全局 sendfile 线程池（幂等）
+    SendfilePool::instance().start(4);
 }
 
 PeerSession::~PeerSession() = default;
@@ -60,6 +75,7 @@ void PeerSession::send_handshake() {
     Handshake h;
     h.build(info_hash_, local_speed_mbps_);
     for (int i = 0; i < 20; i++) h.peer_id[i] = static_cast<uint8_t>(rand() % 256);
+    std::cerr << "[peer] send_handshake to " << remote_ip() << ":" << remote_port() << std::endl;
     send_message(serialize_handshake(h));
     handshake_sent_ = true;
 }
@@ -83,8 +99,15 @@ void PeerSession::handle_handshake(const asio::error_code& ec, size_t) {
 
     state_ = State::CONNECTED;
     start_eval_timer();
+    std::cerr << "[peer] eval_timer_started" << std::endl;
     start_read_header();
-    if (on_handshake_done_) on_handshake_done_(shared_from_this());
+    std::cerr << "[peer] read_header_started" << std::endl;
+    std::cerr << "[peer] handshake done with " << remote_ip() << ":" << remote_port() << " speed=" << remote_speed_mbps_ << "Mbps" << std::endl;
+    if (on_handshake_done_) {
+        std::cerr << "[peer] calling on_handshake_done" << std::endl;
+        on_handshake_done_(shared_from_this());
+        std::cerr << "[peer] on_handshake_done returned" << std::endl;
+    }
 }
 
 // ── Message read chain ──
@@ -172,23 +195,89 @@ void PeerSession::handle_request_msg(const uint8_t* data) {
     // CANCEL check — skip if this sub-block was cancelled (Endgame cleanup)
     if (cancelled_set_.count({index, begin})) return;
 
-    if (file_fd_ >= 0) {
+        if (file_fd_ >= 0) {
         uint64_t base_off = (chunk_offsets_ && index < chunk_offsets_->size())
                             ? (*chunk_offsets_)[index] : index * 131072ULL;
         uint64_t file_off = base_off + begin;
+            // 如果启用 sendfile，并且写队列为空且当前没有异步写进行，则采用后台线程发送 header+sendfile
+            bool try_sendfile = use_sendfile_;
+            {
+                std::lock_guard<std::mutex> lk(write_mtx_);
+                if (!try_sendfile || !write_queue_.empty() || is_writing_) try_sendfile = false;
+                else is_writing_ = true; // 保证我们在后台发送期间不被 do_write 干扰
+            }
 
-        // 使用 pread() 而非 sendfile(2):
-        // sendfile(2) 是阻塞系统调用，LAN 场景下 16KB 子块从 page cache
-        // 读取耗时 < 1μs，额外内存拷贝开销可忽略。在 asio 事件循环中直接
-        // 调用 sendfile(2) 会阻塞所有 Peer 连接，收益不抵风险。
-        // 真零拷贝需 Linux splice(2)+SPLICE_F_NONBLOCK+pipe 组合，复杂度高。
-        std::vector<uint8_t> buf(length);
-        ssize_t n = thinbt_pread(file_fd_, buf.data(), length, static_cast<off_t>(file_off));
-        if (n > 0) {
-            auto msg = build_piece(index, begin, buf.data(), static_cast<uint32_t>(n));
-            add_sent_bytes(msg.size());
-            send_message(std::move(msg));
-        }
+            if (try_sendfile) {
+                auto self = shared_from_this();
+                int local_file_fd = file_fd_;
+                uint64_t off = file_off;
+                uint32_t send_len = length;
+                uint32_t idx = index;
+                uint32_t bg = begin;
+                // 使用全局 sendfile 线程池提交任务，避免频繁创建线程
+                SendfilePool::instance().post([self, local_file_fd, off, send_len, idx, bg]() mutable {
+                    // 检查连接是否已关闭，防止在已关闭的 socket 上操作
+                    if (self->closed_.load(std::memory_order_acquire)) return;
+                    auto sockfd = self->socket_->native_handle();
+                    // 构建 13 字节 header: [len_be:4][id:1][idx:4][beg:4]
+                    uint32_t msg_len = 1 + 8 + send_len;
+                    uint32_t len_be = htonl(msg_len);
+                    uint8_t hdr[13];
+                    memcpy(hdr, &len_be, 4);
+                    hdr[4] = static_cast<uint8_t>(P2PMsgId::PIECE);
+                    uint32_t idx_be = htonl(idx), beg_be = htonl(bg);
+                    memcpy(hdr + 5, &idx_be, 4);
+                    memcpy(hdr + 9, &beg_be, 4);
+
+                    // 先发送 header（MSG_NOSIGNAL 防止对端断开时 SIGPIPE 杀死进程）
+                    ssize_t hn = ::send(sockfd, reinterpret_cast<const char*>(hdr), sizeof(hdr), MSG_NOSIGNAL);
+                    ssize_t sent_body = 0;
+                    if (hn == static_cast<ssize_t>(sizeof(hdr))) {
+                        // sendfile 发送数据体
+                        uint64_t off_var = off;
+                        ssize_t n = sendfile_zero_copy(sockfd, local_file_fd, off_var, send_len);
+                        if (n > 0) sent_body = n;
+                    }
+
+                    // 回到 io_context 线程更新状态并可能触发后续写
+                    asio::post(self->socket_->get_executor(), [self, sent_header = (ssize_t)13, sent_body]() {
+                        if (sent_body > 0) self->add_sent_bytes(static_cast<uint32_t>(sent_header + sent_body));
+                        // 完成 sendfile 后释放写锁并触发后续写
+                        bool has_more = false;
+                        {
+                            std::lock_guard<std::mutex> lk(self->write_mtx_);
+                            self->is_writing_ = false;
+                            has_more = !self->write_queue_.empty();
+                        }
+                        if (has_more) self->do_write();
+                    });
+                });
+            } else {
+                // 将阻塞的 pread 转到后台线程池执行，读取完成后回到 io_context 发送
+                {
+                    auto self = shared_from_this();
+                    int fd = file_fd_;
+                    off_t off = static_cast<off_t>(file_off);
+                    size_t len = length;
+                    uint32_t idx = index;
+                    uint32_t bg = begin;
+                    // 启动文件读线程池（幂等）
+                    FileReadPool::instance().start(2);
+                    FileReadPool::instance().post_read(fd, off, len,
+                        [self, idx, bg](ssize_t n, std::shared_ptr<std::vector<uint8_t>> data) {
+                            // 检查连接是否已关闭
+                            if (self->closed_.load(std::memory_order_acquire)) return;
+                            // 在 pool 线程调用的回调里，把实际发送调度回 io_context
+                            asio::post(self->socket_->get_executor(), [self, n, data, idx, bg]() {
+                                if (n > 0 && data && !data->empty()) {
+                                    auto msg = build_piece(idx, bg, data->data(), static_cast<uint32_t>(n));
+                                    self->add_sent_bytes(msg.size());
+                                    self->send_message(std::move(msg));
+                                }
+                            });
+                        });
+                }
+            }
     }
 }
 
@@ -211,21 +300,18 @@ void PeerSession::handle_pex_msg(const uint8_t* data, uint32_t len) {
     for (uint16_t i = 0; i < count; i++) {
         PexPeer p;
         memcpy(&p, data + 3 + i * 8, 8);
-        p.ip   = ntoh32(p.ip);
-        p.port = ntoh16(p.port);
-
         bool is_left = (p.flags & 0x80) != 0;
 
         if (op == 0x01 && is_left) {
             // Delta: 对端离开，通知 PeerManager 从本地池移除
             if (on_pex_remove_) {
                 struct in_addr ia; ia.s_addr = p.ip;
-                on_pex_remove_(inet_ntoa(ia), p.port);
+                on_pex_remove_(inet_ntoa(ia), ntoh16(p.port));
             }
         } else if (!is_left && on_pex_peer_) {
             // 全量: 忽略 left Peer；增量: 新加入的 Peer 尝试连接
             struct in_addr ia; ia.s_addr = p.ip;
-            on_pex_peer_(inet_ntoa(ia), p.port, p.flags);
+            on_pex_peer_(inet_ntoa(ia), ntoh16(p.port), p.flags);
         }
     }
 }
@@ -235,6 +321,10 @@ void PeerSession::handle_piece_msg(const uint8_t* data, uint32_t len) {
     uint32_t index, begin;
     memcpy(&index, data, 4); index = ntoh32(index);
     memcpy(&begin, data + 4, 4); begin = ntoh32(begin);
+
+    // 追踪：记录每个 sub-block 来自哪个 peer
+    std::cerr << "[rx] chunk=" << index << " sub_begin=" << begin
+              << " len=" << (len - 8) << " from=" << remote_ip() << std::endl;
 
     // Fast Fail: 收到数据 → 清除超时计数
     consecutive_timeouts_ = 0;
@@ -285,20 +375,21 @@ void PeerSession::send_message(std::vector<uint8_t> buf) {
 
 void PeerSession::do_write() {
     auto self = shared_from_this();
-    std::vector<uint8_t> front;
+    std::shared_ptr<std::vector<uint8_t>> owned;
     {
         std::lock_guard<std::mutex> lock(write_mtx_);
         if (write_queue_.empty()) { is_writing_ = false; return; }
-        front.swap(write_queue_.front()); // swap to avoid holding lock during async
+        owned = std::make_shared<std::vector<uint8_t>>(std::move(write_queue_.front()));
+        write_queue_.pop_front();
     }
-    auto buf = asio::buffer(front);
+
+    auto buf = asio::buffer(*owned);
     asio::async_write(*socket_, buf,
-        [self, front = std::move(front)](asio::error_code ec, size_t) mutable {
+        [self, owned](asio::error_code ec, size_t) {
             if (ec) { self->disconnect(); return; }
             bool has_more = false;
             {
                 std::lock_guard<std::mutex> lk(self->write_mtx_);
-                self->write_queue_.pop_front();
                 has_more = !self->write_queue_.empty();
                 if (!has_more) self->is_writing_ = false;
             }
@@ -309,6 +400,7 @@ void PeerSession::do_write() {
 void PeerSession::disconnect() {
     if (state_ == State::DISCONNECTED) return;
     state_ = State::DISCONNECTED;
+    closed_.store(true, std::memory_order_release);  // 先标记关闭，阻止后台线程访问 socket
     asio::error_code ec;
     if (eval_timer_) eval_timer_->cancel(ec);
     socket_->close(ec);

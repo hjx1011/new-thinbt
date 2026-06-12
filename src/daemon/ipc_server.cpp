@@ -6,8 +6,13 @@
 namespace thinbt {
 
 IpcServer::IpcServer(asio::io_context& io, TaskManager& task_mgr, uint16_t port)
-    : io_(io), task_mgr_(task_mgr), port_(port),
-      acceptor_(io, asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), port)) {}
+    : io_(io), task_mgr_(task_mgr), port_(port), acceptor_(io) {
+    asio::ip::tcp::endpoint endpoint(asio::ip::address_v4::loopback(), port);
+    acceptor_.open(endpoint.protocol());
+    acceptor_.set_option(asio::socket_base::reuse_address(true));
+    acceptor_.bind(endpoint);
+    acceptor_.listen();
+}
 
 void IpcServer::start() {
     do_accept();

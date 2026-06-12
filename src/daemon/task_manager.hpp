@@ -22,6 +22,7 @@ namespace thinbt {
 
 class PeerManager;
 class TrackerClient;
+void mark_seed_complete(Scheduler& scheduler, const std::vector<bool>& bitfield);
 
 struct TaskInfo {
     std::string task_id;
@@ -88,9 +89,13 @@ private:
         uint64_t bytes_done = 0;
         double speed_ema = 0.0;
         double completed_speed_mib_s = 0.0;
+        std::chrono::steady_clock::time_point startup_announce_deadline{};
+        std::chrono::steady_clock::time_point next_startup_announce{};
         uint64_t last_bytes_done = 0;            // 上一 tick 的 bytes_done，用于计算速度
         std::atomic<bool> tracker_dead{false};   // Tracker 重试耗尽标记
     };
+
+    void announce_task_now(ActiveTask& task);
 
     asio::io_context& io_;
     std::unique_ptr<asio::steady_timer> stats_timer_;

@@ -43,6 +43,7 @@ public:
     void init(uint32_t total_chunks, uint32_t local_speed_mbps,
               RequestIssuer issue_req, HaveBroadcaster broadcast_have,
               NotInterestedBroadcaster broadcast_not_interested);
+    void randomize_piece_order(uint32_t seed);
     void set_cancel_issuer(CancelIssuer cancel);
     void set_not_interested_issuer(NotInterestedIssuer issuer);
     void set_chunk_sizes(const std::vector<uint32_t>& sizes);
@@ -50,7 +51,9 @@ public:
     // Event-driven availability (O(1) per event)
     void on_bitfield(uint32_t slot_id, const std::vector<bool>& bf);
     void on_have(uint32_t slot_id, uint32_t chunk_idx);
+    bool wants_peer(uint32_t slot_id) const;
     void on_peer_added(uint32_t slot_id, uint32_t reported_speed);
+    void on_peer_speed(uint32_t slot_id, uint32_t reported_speed);
     void on_peer_removed(uint32_t slot_id);
     void on_choke_change(uint32_t slot_id, bool choking);
     void dec_peer_pending(uint32_t slot_id, uint32_t chunk_idx, uint32_t begin);
@@ -67,7 +70,10 @@ public:
 
 private:
     std::optional<uint32_t> select_best_peer(uint32_t chunk_idx);
+    bool try_schedule_for_peer(PeerSlot& peer, uint64_t now_ms);
+    bool try_schedule_chunk_on_peer(PeerSlot& peer, uint32_t chunk_idx, uint64_t now_ms, uint32_t effective_cap);
     void send_cancel_for_chunk(uint32_t chunk_idx, uint32_t exclude_slot);
+    void rebalance_seed_requests_for_peer(PeerSlot& peer, uint64_t now_ms, uint32_t max_moves);
     void tick_endgame(uint64_t now_ms);
     void check_peer_interest(uint32_t slot_id);  // 检查 peer 是否有我们需要的 chunk
 

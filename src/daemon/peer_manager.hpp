@@ -16,6 +16,12 @@ namespace thinbt {
 class Scheduler;
 class IOWorkerPool;
 
+bool is_connectable_peer_ip(const std::string& ip);
+bool is_self_peer_endpoint(const std::vector<std::string>& local_ips,
+                           uint16_t local_port,
+                           const std::string& ip,
+                           uint16_t port);
+
 class PeerManager {
 public:
     static constexpr size_t MAX_PEERS = 60;
@@ -39,9 +45,18 @@ public:
     const std::vector<std::shared_ptr<PeerSession>>& sessions() const { return sessions_; }
 
 private:
+    struct RecentPeer {
+        std::chrono::steady_clock::time_point when;
+        uint16_t port = 0;
+        uint8_t flags = 0;
+    };
+
     void on_peer_connected(std::shared_ptr<PeerSession> sess);
     void on_peer_disconnected(std::shared_ptr<PeerSession> sess);
     void do_accept();
+    void note_recent_connect(const std::shared_ptr<PeerSession>& sess);
+    void note_recent_disconnect(const std::shared_ptr<PeerSession>& sess);
+    std::vector<std::string> collect_local_peer_ips() const;
 
     asio::io_context& io_;
     Scheduler& sched_;
@@ -56,8 +71,9 @@ private:
     uint32_t next_slot_id_ = 0;
     std::vector<std::shared_ptr<PeerSession>> sessions_;
 
-    std::map<std::string, std::pair<std::chrono::steady_clock::time_point, uint8_t>> recent_connects_;
-    std::map<std::string, std::pair<std::chrono::steady_clock::time_point, uint8_t>> recent_disconnects_;
+    std::map<std::string, RecentPeer> recent_connects_;
+    std::map<std::string, RecentPeer> recent_disconnects_;
+    std::vector<std::string> local_peer_ips_;
 };
 
 } // namespace thinbt

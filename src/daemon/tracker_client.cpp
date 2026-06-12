@@ -57,6 +57,7 @@ TrackerClient::TrackerClient(asio::io_context& io, const std::string& info_hash_
 
 void TrackerClient::announce(const std::string& host, uint16_t port, OnPeers on_peers) {
     retry_count_ = 0;
+    dead_signalled_ = false;
     do_announce(host, port, std::move(on_peers));
 }
 
@@ -90,13 +91,23 @@ void TrackerClient::do_announce(std::string host, uint16_t port, OnPeers on_peer
                             std::string resp(resp_buf->data(), len);
                             std::vector<PexPeer> peers = parse_tracker_response(resp);
 
-                            if (peers.empty())
-                                self->schedule_retry(std::move(on_peers), host, port);
-                            else
-                                on_peers(peers);
+                            on_peers(peers);
+                            if (peers.empty()) {
+                                self->schedule_empty_poll(on_peers, host, port);
+                            }
                         });
                 });
         });
+}
+
+void TrackerClient::schedule_empty_poll(OnPeers on_peers, std::string host, uint16_t port) {
+    if (!retry_enabled_) return;
+    auto self = shared_from_this();
+    auto timer = std::make_shared<asio::steady_timer>(io_, std::chrono::milliseconds(EMPTY_POLL_INTERVAL_MS));
+    timer->async_wait([self, timer, on_peers = std::move(on_peers), host = std::move(host), port](asio::error_code ec) mutable {
+        if (ec) return;
+        self->do_announce(std::move(host), port, std::move(on_peers));
+    });
 }
 
 void TrackerClient::schedule_retry(OnPeers on_peers, std::string host, uint16_t port) {
@@ -111,7 +122,7 @@ void TrackerClient::schedule_retry(OnPeers on_peers, std::string host, uint16_t 
     retry_count_++;
     auto self = shared_from_this();
     auto timer = std::make_shared<asio::steady_timer>(io_, std::chrono::seconds(30));
-    timer->async_wait([self, on_peers = std::move(on_peers), host = std::move(host), port](asio::error_code) mutable {
+    timer->async_wait([self, timer, on_peers = std::move(on_peers), host = std::move(host), port](asio::error_code) mutable {
         self->do_announce(std::move(host), port, std::move(on_peers));
     });
 }

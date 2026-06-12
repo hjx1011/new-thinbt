@@ -27,7 +27,8 @@ public:
     using OnPexPeer   = std::function<void(const std::string& ip, uint16_t port, uint8_t flags)>;
     using OnPexRemove = std::function<void(const std::string& ip, uint16_t port)>;
 
-    PeerSession(asio::io_context& io, const Sha1Digest& info_hash, uint32_t local_speed_mbps);
+    PeerSession(asio::io_context& io, const Sha1Digest& info_hash, uint32_t local_speed_mbps,
+                uint16_t local_listen_port = 0);
     ~PeerSession();
 
     // Inbound: peer connected to us
@@ -41,8 +42,11 @@ public:
 
     // Accessors
     asio::ip::tcp::socket& socket() { return *socket_; }
-    bool is_choked() const { return am_choked_.load(std::memory_order_acquire); }
-    void set_choked(bool v) { am_choked_.store(v, std::memory_order_release); }
+    bool is_peer_choking_me() const { return peer_choking_me_.load(std::memory_order_acquire); }
+    bool is_choking_peer() const { return choking_peer_.load(std::memory_order_acquire); }
+    void set_choking_peer(bool choking) { choking_peer_.store(choking, std::memory_order_release); }
+    bool is_choked() const { return is_choking_peer(); }
+    void set_choked(bool v) { set_choking_peer(v); }
     const std::vector<bool>& remote_bitfield() const { return remote_bitfield_; }
     uint32_t link_speed_reported() const { return remote_speed_mbps_; }
     uint32_t pipeline_cap() const { return pipeline_cap_; }
@@ -54,6 +58,7 @@ public:
     void set_slot_id(uint32_t id) { slot_id_ = id; }
     std::string remote_ip() const;
     uint16_t remote_port() const;
+    uint16_t remote_listen_port() const { return remote_listen_port_; }
 
     void record_have(uint32_t chunk_idx);
     void record_bitfield(const uint8_t* data, uint32_t len);
@@ -110,6 +115,7 @@ private:
     std::shared_ptr<asio::ip::tcp::socket> socket_;
     Sha1Digest info_hash_;
     uint32_t local_speed_mbps_;
+    uint16_t local_listen_port_;
     State state_ = HANDSHAKE;
     OnDisconnect on_disconnect_;
 
@@ -119,8 +125,10 @@ private:
     std::array<uint8_t, 5> header_buf_{};
 
     uint32_t remote_speed_mbps_ = 0;
+    uint16_t remote_listen_port_ = 0;
     std::vector<bool> remote_bitfield_;
-    std::atomic<bool> am_choked_{true};
+    std::atomic<bool> peer_choking_me_{true};
+    std::atomic<bool> choking_peer_{true};
     std::atomic<bool> peer_interested_{false};
     std::atomic<bool> am_interested_{false};
 
@@ -158,7 +166,8 @@ private:
     uint64_t sent_bytes_since_last_choke_ = 0;
     uint32_t download_rate_kbps_ = 0;
     uint32_t upload_rate_kbps_ = 0;
-    std::chrono::steady_clock::time_point last_choke_eval_time_;
+    std::chrono::steady_clock::time_point last_download_eval_time_;
+    std::chrono::steady_clock::time_point last_upload_eval_time_;
 
     // 可选：启用 sendfile 零拷贝上传（通过环境变量 THINBT_ENABLE_SENDFILE=1 控制）
     bool use_sendfile_ = false;

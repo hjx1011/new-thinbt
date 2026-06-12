@@ -19,18 +19,21 @@
 
 namespace thinbt {
 
-PeerSession::PeerSession(asio::io_context& io, const Sha1Digest& info_hash, uint32_t local_speed_mbps)
+PeerSession::PeerSession(asio::io_context& io, const Sha1Digest& info_hash, uint32_t local_speed_mbps,
+                         uint16_t local_listen_port)
     : socket_(std::make_shared<asio::ip::tcp::socket>(io))
     , local_speed_mbps_(local_speed_mbps)
+    , local_listen_port_(local_listen_port)
     , eval_timer_(std::make_unique<asio::steady_timer>(io))
     , last_eval_time_(std::chrono::steady_clock::now())
-    , last_choke_eval_time_(std::chrono::steady_clock::now())
+    , last_download_eval_time_(std::chrono::steady_clock::now())
+    , last_upload_eval_time_(std::chrono::steady_clock::now())
 {
     memcpy(info_hash_.data(), info_hash.data(), 20);
     // 默认启用 sendfile，除非通过 THINBT_ENABLE_SENDFILE=0 显式关闭
-    use_sendfile_ = true;
+    use_sendfile_ = false;
     const char* env = std::getenv("THINBT_ENABLE_SENDFILE");
-    if (env && std::string(env) == "0") use_sendfile_ = false;
+    if (env && std::string(env) == "1") use_sendfile_ = true;
     // 启动全局 sendfile 线程池（幂等）
     SendfilePool::instance().start(4);
 }
@@ -73,7 +76,7 @@ void PeerSession::start_outbound(const std::string& host, uint16_t port, OnDisco
 // ── Handshake ──
 void PeerSession::send_handshake() {
     Handshake h;
-    h.build(info_hash_, local_speed_mbps_);
+    h.build(info_hash_, local_speed_mbps_, local_listen_port_);
     for (int i = 0; i < 20; i++) h.peer_id[i] = static_cast<uint8_t>(rand() % 256);
     std::cerr << "[peer] send_handshake to " << remote_ip() << ":" << remote_port() << std::endl;
     send_message(serialize_handshake(h));
@@ -94,6 +97,7 @@ void PeerSession::handle_handshake(const asio::error_code& ec, size_t) {
     if (memcmp(h.info_hash, info_hash_.data(), 20) != 0) { disconnect(); return; }
 
     remote_speed_mbps_ = h.speed_mbps;
+    remote_listen_port_ = h.listen_port();
 
     if (!handshake_sent_) send_handshake();
 
@@ -149,18 +153,24 @@ void PeerSession::start_read_body(uint32_t body_len, P2PMsgId msg_id) {
 void PeerSession::dispatch_message(P2PMsgId id, const uint8_t* data, uint32_t len) {
     switch (id) {
     case P2PMsgId::CHOKE:
-        am_choked_.store(true, std::memory_order_release);
+        peer_choking_me_.store(true, std::memory_order_release);
         if (scheduler_) scheduler_->on_choke_change(slot_id_, true);
         break;
     case P2PMsgId::UNCHOKE:
-        am_choked_.store(false, std::memory_order_release);
+        peer_choking_me_.store(false, std::memory_order_release);
         if (scheduler_) {
             scheduler_->on_choke_change(slot_id_, false);
             if (scheduler_->missing_count() > 0)
                 send_interested();
         }
         break;
-    case P2PMsgId::INTERESTED:     peer_interested_.store(true, std::memory_order_release);  break;
+    case P2PMsgId::INTERESTED:
+        peer_interested_.store(true, std::memory_order_release);
+        if (choking_peer_.load(std::memory_order_acquire)) {
+            set_choking_peer(false);
+            send_message(build_message(P2PMsgId::UNCHOKE, nullptr, 0));
+        }
+        break;
     case P2PMsgId::NOT_INTERESTED: peer_interested_.store(false, std::memory_order_release); break;
     case P2PMsgId::HAVE:           handle_have_msg(data);   break;
     case P2PMsgId::BITFIELD:       handle_bitfield_msg(data, len); break;
@@ -177,15 +187,17 @@ void PeerSession::handle_have_msg(const uint8_t* data) {
     uint32_t ci; memcpy(&ci, data, 4); ci = ntoh32(ci);
     record_have(ci);
     if (scheduler_) scheduler_->on_have(slot_id_, ci);
+    if (scheduler_ && scheduler_->wants_peer(slot_id_)) send_interested();
 }
 
 void PeerSession::handle_bitfield_msg(const uint8_t* data, uint32_t len) {
     record_bitfield(data, len);
     if (scheduler_) scheduler_->on_bitfield(slot_id_, remote_bitfield_);
+    if (scheduler_ && scheduler_->wants_peer(slot_id_)) send_interested();
 }
 
 void PeerSession::handle_request_msg(const uint8_t* data) {
-    if (am_choked_.load(std::memory_order_acquire)) return;
+    if (choking_peer_.load(std::memory_order_acquire)) return;
 
     uint32_t index, begin, length;
     memcpy(&index, data, 4);     index  = ntoh32(index);
@@ -498,22 +510,23 @@ void PeerSession::do_eval_tick(const asio::error_code& ec) {
 
 void PeerSession::update_download_rate() {
     auto now = std::chrono::steady_clock::now();
-    auto elapsed_s = std::chrono::duration_cast<std::chrono::duration<double>>(now - last_choke_eval_time_).count();
+    auto elapsed_s = std::chrono::duration_cast<std::chrono::duration<double>>(now - last_download_eval_time_).count();
     if (elapsed_s > 0.0) {
         // kbps = bytes * 8 bits/byte / 1000 / elapsed_seconds
         download_rate_kbps_ = static_cast<uint32_t>(recv_bytes_since_last_choke_ * 8.0 / elapsed_s / 1000.0);
     }
     recv_bytes_since_last_choke_ = 0;
-    last_choke_eval_time_ = now;
+    last_download_eval_time_ = now;
 }
 
 void PeerSession::update_upload_rate() {
     auto now = std::chrono::steady_clock::now();
-    auto elapsed_s = std::chrono::duration_cast<std::chrono::duration<double>>(now - last_choke_eval_time_).count();
+    auto elapsed_s = std::chrono::duration_cast<std::chrono::duration<double>>(now - last_upload_eval_time_).count();
     if (elapsed_s > 0.0) {
         upload_rate_kbps_ = static_cast<uint32_t>(sent_bytes_since_last_choke_ * 8.0 / elapsed_s / 1000.0);
     }
     sent_bytes_since_last_choke_ = 0;
+    last_upload_eval_time_ = now;
 }
 
 } // namespace thinbt

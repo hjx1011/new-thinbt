@@ -25,6 +25,7 @@ public:
 private:
     void do_announce(std::string host, uint16_t port, OnPeers on_peers);
     void schedule_retry(OnPeers on_peers, std::string host, uint16_t port);
+    void schedule_empty_poll(OnPeers on_peers, std::string host, uint16_t port);
 
     asio::io_context& io_;
     std::string info_hash_hex_;
@@ -35,6 +36,7 @@ private:
     OnDead on_dead_;
     bool dead_signalled_ = false;
     static constexpr uint32_t MAX_RETRIES = 240;
+    static constexpr uint32_t EMPTY_POLL_INTERVAL_MS = 1000;
 };
 
 } // namespace thinbt

@@ -94,7 +94,19 @@ add_thinbt_test(test_chunk_assembler)
 
 add_thinbt_test(test_protocol)
 
+add_thinbt_test(test_peer_manager)
+
+add_thinbt_test(test_peer_session)
+
+add_thinbt_test(test_scheduler)
+
+add_thinbt_test(test_task_manager)
+
+add_thinbt_test(test_tracker_client)
+
 add_thinbt_test(test_segment_io)
+
+add_thinbt_test(test_incremental_update)
 
 add_thinbt_test(test_loopback)
 add_thinbt_test(test_multinode)

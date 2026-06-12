@@ -46,8 +46,11 @@ int main(int argc, char* argv[]) {
     ipc.start();
 
     // 内置 Tracker 监听所有网卡（供其他节点 announce）
-    TrackerAcceptor tracker_acceptor(ioc, task_mgr.tracker(), tracker_port);
-    tracker_acceptor.start();
+    std::unique_ptr<TrackerAcceptor> tracker_acceptor;
+    if (tracker_host.empty()) {
+        tracker_acceptor = std::make_unique<TrackerAcceptor>(ioc, task_mgr.tracker(), tracker_port);
+        tracker_acceptor->start();
+    }
 
     signal(SIGINT, [](int) { running.store(false); });
     signal(SIGTERM, [](int) { running.store(false); });

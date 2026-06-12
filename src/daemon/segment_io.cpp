@@ -196,7 +196,9 @@ bool SegmentWriter::map_segment(uint32_t seg_idx) {
         return false;
     }
     seg.data = static_cast<uint8_t*>(MapViewOfFile(mapping, FILE_MAP_WRITE,
-                                       0, 0, static_cast<size_t>(map_size)));
+                                       static_cast<DWORD>(seg_start >> 32),
+                                       static_cast<DWORD>(seg_start & 0xFFFFFFFF),
+                                       static_cast<size_t>(map_size)));
     CloseHandle(mapping);
     if (!seg.data) {
         std::cerr << "[SegmentWriter] MapViewOfFile failed" << std::endl;

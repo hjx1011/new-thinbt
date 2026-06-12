@@ -4,10 +4,12 @@
 
 namespace thinbt {
 
-void Handshake::build(const Sha1Digest& ih, uint32_t speed) {
+void Handshake::build(const Sha1Digest& ih, uint32_t speed, uint16_t listen_port) {
     memset(protocol_id, 0, 19);
     memcpy(protocol_id, PROTOCOL_ID, 15);
     memset(reserved, 0, 4);
+    uint16_t port_be = hton16(listen_port);
+    memcpy(reserved, &port_be, sizeof(port_be));
     speed_mbps = hton32(speed);
     memcpy(info_hash, ih.data(), 20);
 }
@@ -16,6 +18,12 @@ bool Handshake::validate_protocol_id() const {
     return memcmp(protocol_id, PROTOCOL_ID, 15) == 0
         && protocol_id[15] == 0 && protocol_id[16] == 0
         && protocol_id[17] == 0 && protocol_id[18] == 0;
+}
+
+uint16_t Handshake::listen_port() const {
+    uint16_t port_be = 0;
+    memcpy(&port_be, reserved, sizeof(port_be));
+    return ntoh16(port_be);
 }
 
 std::vector<uint8_t> serialize_handshake(const Handshake& h) {

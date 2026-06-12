@@ -18,6 +18,11 @@
 #include <unordered_map>
 
 namespace thinbt {
+
+void mark_seed_complete(Scheduler& scheduler, const std::vector<bool>& bitfield) {
+    scheduler.mark_all_complete(bitfield);
+}
+
 namespace {
 
 // 返回 ISO 8601 格式 UTC 时间字符串: "2026-06-09T08:00:00Z"
@@ -170,6 +175,7 @@ std::string TaskManager::cmd_seed(const std::string& seed_path, const std::strin
             sizes[i] = task->seed->chunks[i].length;
         task->scheduler->set_chunk_sizes(sizes);
     }
+    mark_seed_complete(*task->scheduler, full_bf);
 
     task->scheduler->set_cancel_issuer(
         [pm](uint32_t slot_id, uint32_t chunk_idx, uint32_t begin, uint32_t length) {
@@ -186,7 +192,9 @@ std::string TaskManager::cmd_seed(const std::string& seed_path, const std::strin
             if (sess) sess->send_not_interested();
         });
 
-    tasks_[tid] = std::move(task);
+    auto& stored = tasks_[tid];
+    stored = std::move(task);
+    announce_task_now(*stored);
 
     return R"({"status":"ok","data":{"task_id":")" + tid + R"("}})";
 }
@@ -199,6 +207,8 @@ std::string TaskManager::cmd_add(const std::string& seed_path, const std::string
     task->state = "downloading";
     task->started_at = iso8601_now();
     task->started_mono = std::chrono::steady_clock::now();
+    task->startup_announce_deadline = task->started_mono + std::chrono::seconds(60);
+    task->next_startup_announce = task->started_mono + std::chrono::seconds(2);
     task->seed = std::move(seed);
     task->file_path = save_path;
     task->seed_path = seed_path;
@@ -317,6 +327,8 @@ std::string TaskManager::cmd_add(const std::string& seed_path, const std::string
             sizes[i] = task->seed->chunks[i].length;
         task->scheduler->set_chunk_sizes(sizes);
     }
+    task->scheduler->randomize_piece_order(static_cast<uint32_t>(
+        std::hash<std::string>{}(tid) ^ std::chrono::steady_clock::now().time_since_epoch().count()));
 
     // 断点续传：将已校验通过的 chunk 标记为 COMPLETE
     if (initial_bytes_done > 0)
@@ -337,7 +349,9 @@ std::string TaskManager::cmd_add(const std::string& seed_path, const std::string
             if (sess) sess->send_not_interested();
         });
 
-    tasks_[tid] = std::move(task);
+    auto& stored = tasks_[tid];
+    stored = std::move(task);
+    announce_task_now(*stored);
 
     return R"({"status":"ok","data":{"task_id":")" + tid + R"("}})";
 }
@@ -355,6 +369,8 @@ std::string TaskManager::cmd_update(const std::string& new_seed_path, const std:
     task->state = "downloading";
     task->started_at = iso8601_now();
     task->started_mono = std::chrono::steady_clock::now();
+    task->startup_announce_deadline = task->started_mono + std::chrono::seconds(60);
+    task->next_startup_announce = task->started_mono + std::chrono::seconds(2);
     task->seed = std::move(new_seed_ptr);
     task->file_path = new_file_path;
     task->seed_path = new_seed_path;
@@ -427,7 +443,7 @@ std::string TaskManager::cmd_update(const std::string& new_seed_path, const std:
     uint64_t matched_bytes = 0;
     if (incremental_ok) {
         int new_fd = task->writer->get_file_fd();
-        int old_fd = ::open(old_file_path.c_str(), O_RDWR);
+        int old_fd = ::open(old_file_path.c_str(), O_RDONLY);
         for (uint32_t i = 0; i < chunk_count; i++) {
             std::string key(reinterpret_cast<const char*>(task->seed->chunks[i].sha256), 32);
             auto it = old_chunk_index.find(key);
@@ -450,15 +466,6 @@ std::string TaskManager::cmd_update(const std::string& new_seed_path, const std:
             }
         }
         // 未被复用的旧文件块，使用 fallocate punch_hole 释放空洞归还磁盘空间
-        if (old_fd >= 0 && !old_chunk_index.empty()) {
-            MappedFile old_mf;
-            if (old_mf.open_and_map(old_file_path, true)) {
-                for (const auto& [k, old_chunks] : old_chunk_index) {
-                    for (const auto& old_c : old_chunks)
-                        old_mf.punch_hole(old_c.first, old_c.second);
-                }
-            }
-        }
         if (old_fd >= 0) ::close(old_fd);
     }
     task->bytes_done = matched_bytes;
@@ -502,6 +509,9 @@ std::string TaskManager::cmd_update(const std::string& new_seed_path, const std:
     }
 
     // 增量匹配的 chunk 标记为已完成，避免 P2P 重复下载
+    task->scheduler->randomize_piece_order(static_cast<uint32_t>(
+        std::hash<std::string>{}(tid) ^ std::chrono::steady_clock::now().time_since_epoch().count()));
+
     if (matched > 0)
         task->scheduler->mark_all_complete(init_bf);
 
@@ -520,7 +530,9 @@ std::string TaskManager::cmd_update(const std::string& new_seed_path, const std:
             if (sess) sess->send_not_interested();
         });
 
-    tasks_[tid] = std::move(task);
+    auto& stored = tasks_[tid];
+    stored = std::move(task);
+    announce_task_now(*stored);
 
     std::ostringstream resp;
     resp << R"({"status":"ok","data":{"task_id":")" << tid
@@ -549,6 +561,40 @@ std::vector<TaskInfo> TaskManager::cmd_list() {
         result.push_back(info);
     }
     return result;
+}
+
+void TaskManager::announce_task_now(ActiveTask& task) {
+    if (!task.seed || !task.peer_mgr) return;
+
+    std::string host = tracker_host_;
+    uint16_t port = tracker_port_;
+    if (host.empty()) {
+        TrackerUrl t_url;
+        if (parse_tracker_url(task.seed->announce_url, t_url)) {
+            host = t_url.host;
+            port = t_url.port;
+        }
+    }
+    if (host.empty()) host = "127.0.0.1";
+
+    std::string info_hash_hex = sha1_hex(task.seed->info_hash);
+    if (!task.tracker_client) {
+        task.tracker_client = std::make_shared<TrackerClient>(io_, info_hash_hex, p2p_port_, 1000);
+        task.tracker_client->set_on_dead([&dead = task.tracker_dead]() {
+            dead.store(true, std::memory_order_release);
+        });
+    }
+
+    task.tracker_dead.store(false, std::memory_order_release);
+    task.tracker_client->announce(host, port,
+        [&task](const std::vector<PexPeer>& peers) {
+            for (const auto& p : peers) {
+                struct in_addr ia;
+                ia.s_addr = p.ip;
+                std::string ip = inet_ntoa(ia);
+                task.peer_mgr->connect_to(ip, ntoh16(p.port), p.flags);
+            }
+        });
 }
 
 std::string TaskManager::cmd_remove(const std::string& task_id, bool /*force*/) {
@@ -638,6 +684,13 @@ void TaskManager::tick() {
             t->state = "waiting";
         }
 
+        auto now = std::chrono::steady_clock::now();
+        if (!t->is_seed && t->state == "downloading" && t->seed && t->peer_mgr &&
+            now < t->startup_announce_deadline && now >= t->next_startup_announce) {
+            t->next_startup_announce = now + std::chrono::seconds(2);
+            announce_task_now(*t);
+        }
+
         // 速度 EMA 计算（α=0.125），每 100ms tick
         {
             uint64_t delta = t->bytes_done - t->last_bytes_done;
@@ -649,6 +702,7 @@ void TaskManager::tick() {
 }
 
 void TaskManager::tick_tracker_announce(asio::io_context& io) {
+    (void)io;
     for (auto& [tid, t] : tasks_) {
         if (!t->seed) continue;
         std::string info_hash_hex = sha1_hex(t->seed->info_hash);
@@ -679,14 +733,7 @@ void TaskManager::tick_tracker_announce(asio::io_context& io) {
         // PeerManager 应在 cmd_seed/cmd_add 中已创建
         if (!t->peer_mgr) continue;
 
-        t->tracker_client->announce(host, port,
-            [&t = *t](const std::vector<PexPeer>& peers) {
-                for (auto& p : peers) {
-                    struct in_addr ia; ia.s_addr = p.ip;
-                    std::string ip = inet_ntoa(ia);
-                    t.peer_mgr->connect_to(ip, ntoh16(p.port), p.flags);
-                }
-            });
+        announce_task_now(*t);
     }
 }
 

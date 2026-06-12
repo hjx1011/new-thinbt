@@ -46,7 +46,13 @@ uint64_t json_extract_int(const std::string& obj, const std::string& key) {
 } // anonymous namespace
 
 TrackerAcceptor::TrackerAcceptor(asio::io_context& io, TrackerServer& server, uint16_t port)
-    : io_(io), server_(server), acceptor_(io, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port)) {}
+    : io_(io), server_(server), acceptor_(io) {
+    asio::ip::tcp::endpoint endpoint(asio::ip::tcp::v4(), port);
+    acceptor_.open(endpoint.protocol());
+    acceptor_.set_option(asio::socket_base::reuse_address(true));
+    acceptor_.bind(endpoint);
+    acceptor_.listen();
+}
 
 void TrackerAcceptor::start() {
     do_accept();

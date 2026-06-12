@@ -36,8 +36,9 @@ struct Handshake {
     uint8_t  info_hash[20]   = {};
     uint8_t  peer_id[20]     = {};
 
-    void build(const Sha1Digest& ih, uint32_t speed);
+    void build(const Sha1Digest& ih, uint32_t speed, uint16_t listen_port = 0);
     bool validate_protocol_id() const;
+    uint16_t listen_port() const;
 };
 static_assert(sizeof(Handshake) == 67, "Handshake must be 67 bytes");
 
